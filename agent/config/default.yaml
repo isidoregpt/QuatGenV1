@@ -1,5 +1,0 @@
-defaults:
-  - representation: representation
-  - reward: reward
-  - constraints: constraints
-  - training: training

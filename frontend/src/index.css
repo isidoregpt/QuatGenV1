@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1f2937;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* AG Grid dark theme overrides */
+.ag-theme-alpine-dark {
+  --ag-background-color: #111827;
+  --ag-header-background-color: #1f2937;
+  --ag-odd-row-background-color: #1a1a2e;
+  --ag-row-hover-color: #374151;
+}
+
+/* Score badge styles */
+.score-high { @apply bg-emerald-500/20 text-emerald-400; }
+.score-medium { @apply bg-yellow-500/20 text-yellow-400; }
+.score-low { @apply bg-red-500/20 text-red-400; }

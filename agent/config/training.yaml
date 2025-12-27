@@ -1,6 +1,0 @@
-training:
-  algorithm: "ppo"
-  seed: 1337
-  checkpoint_every_minutes: 30
-  snapshot_every_hours: 1
-  daily_report_hour_local: 2

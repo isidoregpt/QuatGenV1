@@ -1,0 +1,50 @@
+# Quat Generator Pro - Backend Dependencies
+# Python 3.11+
+
+# Web Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+websockets>=12.0
+
+# Database
+sqlalchemy>=2.0.25
+aiosqlite>=0.19.0
+
+# Chemistry
+rdkit>=2023.9.4
+pubchempy>=1.0.4
+
+# Machine Learning
+torch>=2.1.0
+transformers>=4.36.0
+numpy>=1.26.0
+pandas>=2.1.0
+scikit-learn>=1.4.0
+
+# QSAR / Molecular Descriptors
+mordred>=1.2.0
+descriptastorus>=2.6.0
+
+# Export
+reportlab>=4.0.0
+svglib>=1.5.0
+openpyxl>=3.1.0
+
+# Utilities
+pydantic>=2.5.0
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+joblib>=1.3.0
+httpx>=0.26.0
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+black>=24.1.0
+ruff>=0.1.0
+mypy>=1.8.0
+
+# Optional: GPU acceleration
+# Install separately based on CUDA version:
+# pip install torch --index-url https://download.pytorch.org/whl/cu121
