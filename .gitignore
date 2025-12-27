@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+node_modules/
+dist/
+dist-electron/
+*.db
+*.sqlite
+models/*.pt
+logs/
+*.log
+.DS_Store
+.env

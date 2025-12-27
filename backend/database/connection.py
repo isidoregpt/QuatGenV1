@@ -15,7 +15,7 @@ DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 # Create async engine
 engine = create_async_engine(
     DATABASE_URL,
-    echo=False,  # Set True for SQL debugging
+    echo=False,
     pool_pre_ping=True
 )
 
@@ -36,7 +36,6 @@ async def init_db():
     """Initialize database - create all tables"""
     from database.models import Molecule, MoleculeProperty, GenerationRun
     
-    # Ensure data directory exists
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     
     async with engine.begin() as conn:
@@ -78,13 +77,11 @@ async def get_db_stats() -> dict:
     from sqlalchemy import text
     
     async with async_session() as session:
-        # Get table counts
         result = await session.execute(
             text("SELECT COUNT(*) FROM molecules")
         )
         molecule_count = result.scalar() or 0
         
-        # Get database file size
         db_size = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
         
         return {

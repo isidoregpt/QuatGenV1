@@ -1,4 +1,3 @@
-// Molecule types
 export interface Molecule {
   id: number;
   smiles: string;
@@ -16,20 +15,6 @@ export interface Molecule {
   created_at: string;
 }
 
-export interface MoleculeDetail extends Molecule {
-  properties: Record<string, number | string>;
-  similar_molecules: number[];
-  generation_info: GenerationInfo;
-}
-
-export interface GenerationInfo {
-  run_id?: number;
-  started_at?: string;
-  generation_step?: number;
-  weights?: ObjectiveWeights;
-}
-
-// Generation types
 export interface GenerationConstraints {
   min_mw: number;
   max_mw: number;
@@ -65,15 +50,9 @@ export interface GenerationStatus {
   total_batches: number;
   elapsed_seconds: number;
   estimated_remaining_seconds: number;
-  top_scores: {
-    efficacy: number;
-    safety: number;
-    environmental: number;
-    combined: number;
-  };
+  top_scores: { efficacy: number; safety: number; environmental: number; combined: number; };
 }
 
-// API response types
 export interface MoleculeListResponse {
   molecules: Molecule[];
   total: number;
@@ -81,30 +60,12 @@ export interface MoleculeListResponse {
   limit: number;
 }
 
-export interface SystemStatus {
-  system: {
-    platform: string;
-    cpu_count: number;
-    cpu_percent: number;
-    memory_total_gb: number;
-    memory_available_gb: number;
-  };
-  gpu: {
-    available: boolean;
-    device_count: number;
-    devices: Array<{
-      name: string;
-      memory_total_gb: number;
-      memory_free_gb: number;
-    }>;
-  };
-  models: {
-    generator_loaded: boolean;
-    scoring_models_loaded: boolean;
-  };
+export interface MoleculeFilters {
+  pareto_only: boolean;
+  starred_only: boolean;
+  min_efficacy?: number;
 }
 
-// Export types
 export type ExportFormat = 'csv' | 'sdf' | 'pdf';
 
 export interface ExportRequest {
@@ -115,14 +76,4 @@ export interface ExportRequest {
   include_scores: boolean;
   pareto_only: boolean;
   starred_only: boolean;
-}
-
-// Filter types
-export interface MoleculeFilters {
-  pareto_only: boolean;
-  starred_only: boolean;
-  min_efficacy?: number;
-  min_safety?: number;
-  min_environmental?: number;
-  min_sa?: number;
 }
