@@ -1,0 +1,9 @@
+constraints:
+  # Hard constraints (examples; implement in rules engine)
+  hard:
+    - "valid_smiles"
+    - "charge_balance"
+  # Soft constraints (examples)
+  soft:
+    - "tail_length_heuristic"
+    - "branching_preference"

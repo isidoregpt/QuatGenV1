@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "representation": {
+      "type": "object"
+    },
+    "reward": {
+      "type": "object"
+    },
+    "constraints": {
+      "type": "object"
+    },
+    "training": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "representation",
+    "reward",
+    "constraints",
+    "training"
+  ]
+}

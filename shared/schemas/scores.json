@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "efficacy": {
+      "type": "number"
+    },
+    "human_safety": {
+      "type": "number"
+    },
+    "environment": {
+      "type": "number"
+    },
+    "synth_access": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "efficacy",
+    "human_safety",
+    "environment",
+    "synth_access"
+  ]
+}

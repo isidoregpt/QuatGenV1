@@ -1,0 +1,4 @@
+representation:
+  mode: "smi+ais"        # "smiles" | "smi+ais"
+  ais_top_n: 100
+  ais_vocab_path: "data/ais_vocab_top100.json"

@@ -1,0 +1,8 @@
+reward:
+  wE: 0.40
+  wH: 0.25
+  wEnv: 0.25
+  wSA: 0.10
+  wSoftPenalty: 1.00
+  invalid_reward: -1.0
+  hard_violation_reward: -1.0
