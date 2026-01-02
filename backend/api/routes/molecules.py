@@ -203,3 +203,85 @@ async def compute_similarity(
         smiles2=similarity_request.smiles2,
         similarity=similarity
     )
+
+
+# ADMET Prediction Endpoints
+
+class ADMETPredictRequest(BaseModel):
+    smiles: str
+    properties: Optional[List[str]] = None  # None = predict all
+
+
+@router.get("/{molecule_id}/admet")
+async def get_molecule_admet(
+    molecule_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get ADMET predictions for a specific molecule."""
+    molecule = await queries.get_molecule_by_id(db, molecule_id)
+    if not molecule:
+        raise HTTPException(status_code=404, detail="Molecule not found")
+
+    # Get the scoring pipeline from app state
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.admet_ready:
+        raise HTTPException(status_code=503, detail="ADMET predictor not available")
+
+    predictions = pipeline.admet_predictor.predict_all(molecule.smiles)
+
+    return {
+        "molecule_id": molecule_id,
+        "smiles": molecule.smiles,
+        "admet_predictions": predictions
+    }
+
+
+@router.post("/admet/predict")
+async def predict_admet(
+    admet_request: ADMETPredictRequest,
+    request: Request
+):
+    """Predict ADMET properties for an arbitrary SMILES string."""
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.admet_ready:
+        raise HTTPException(status_code=503, detail="ADMET predictor not available")
+
+    smiles = admet_request.smiles
+    properties = admet_request.properties
+
+    if properties:
+        predictions = {
+            p: pipeline.admet_predictor.predict(smiles, p)
+            for p in properties
+        }
+    else:
+        predictions = pipeline.admet_predictor.predict_all(smiles)
+
+    return {
+        "smiles": smiles,
+        "predictions": predictions
+    }
+
+
+@router.get("/admet/models")
+async def list_admet_models(request: Request):
+    """List all available ADMET models and their status."""
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.admet_predictor:
+        raise HTTPException(status_code=503, detail="ADMET predictor not available")
+
+    return {
+        "models": pipeline.admet_predictor.get_model_info(),
+        "loaded_count": len(pipeline.admet_predictor.available_properties),
+        "available_properties": pipeline.admet_predictor.available_properties
+    }

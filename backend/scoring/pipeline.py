@@ -19,6 +19,10 @@ class ScoringConfig:
     encoder_model_name: str = "DeepChem/ChemBERTa-77M-MLM"
     encoder_pooling: str = "mean"  # "mean" or "cls"
     encoder_device: Optional[str] = None  # Auto-detect if None
+    # ADMET models settings
+    use_admet_models: bool = True
+    admet_models: Optional[List[str]] = None  # None = load all available
+    admet_lazy_load: bool = True  # Load models on first use
 
 
 class ScoringPipeline:
@@ -29,6 +33,7 @@ class ScoringPipeline:
         self.environmental_scorer = None
         self.sa_scorer = None
         self.molecular_encoder = None
+        self.admet_predictor = None
         self._is_ready = False
 
     @property
@@ -38,6 +43,10 @@ class ScoringPipeline:
     @property
     def encoder_ready(self) -> bool:
         return self.molecular_encoder is not None and self.molecular_encoder.is_ready
+
+    @property
+    def admet_ready(self) -> bool:
+        return self.admet_predictor is not None and self.admet_predictor.is_ready
 
     @property
     def embedding_dim(self) -> int:
@@ -52,13 +61,35 @@ class ScoringPipeline:
         from scoring.environmental import EnvironmentalScorer
         from scoring.sa_score import SAScorer
 
-        # Initialize scorers
+        # Initialize ADMET predictor first (shared resource for safety/environmental)
+        if self.config.use_admet_models:
+            try:
+                from scoring.admet_models import ADMETPredictor
+                logger.info("Initializing ADMET predictor...")
+                self.admet_predictor = ADMETPredictor(
+                    models_to_load=self.config.admet_models,
+                    lazy_load=self.config.admet_lazy_load
+                )
+                success = await self.admet_predictor.initialize()
+                if success:
+                    logger.info(f"ADMET predictor ready with {len(self.admet_predictor.available_properties)} models")
+                else:
+                    logger.warning("ADMET predictor failed to initialize, using RDKit fallback")
+                    self.admet_predictor = None
+            except Exception as e:
+                logger.warning(f"Failed to initialize ADMET predictor: {e}")
+                self.admet_predictor = None
+
+        # Initialize scorers with ADMET predictor
         self.efficacy_scorer = EfficacyScorer()
         await self.efficacy_scorer.initialize()
+
         self.safety_scorer = SafetyScorer()
-        await self.safety_scorer.initialize()
+        await self.safety_scorer.initialize(admet_predictor=self.admet_predictor)
+
         self.environmental_scorer = EnvironmentalScorer()
-        await self.environmental_scorer.initialize()
+        await self.environmental_scorer.initialize(admet_predictor=self.admet_predictor)
+
         self.sa_scorer = SAScorer()
         await self.sa_scorer.initialize()
 
