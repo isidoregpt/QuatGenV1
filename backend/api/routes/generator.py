@@ -113,3 +113,109 @@ async def get_pareto_frontier(req: Request, db: AsyncSession = Depends(get_db)):
     generator = req.app.state.generator
     pareto_molecules = await generator.get_pareto_frontier()
     return {"count": len(pareto_molecules), "molecules": pareto_molecules}
+
+
+@router.post("/fetch-chembl")
+async def fetch_chembl_data(background_tasks: BackgroundTasks, req: Request, force_refresh: bool = False):
+    """
+    Fetch quaternary ammonium compound data from ChEMBL database.
+
+    This fetches real experimental MIC data for known quaternary ammonium
+    disinfectants and searches for additional compounds with antimicrobial activity.
+    """
+    chembl_fetcher = getattr(req.app.state, "chembl_fetcher", None)
+
+    if not chembl_fetcher:
+        raise HTTPException(status_code=503, detail="ChEMBL fetcher not initialized")
+
+    # Run fetch in background
+    background_tasks.add_task(chembl_fetcher.fetch_all, force_refresh=force_refresh)
+
+    return {
+        "status": "fetching",
+        "message": "ChEMBL data fetch started in background",
+        "force_refresh": force_refresh
+    }
+
+
+@router.get("/training-data")
+async def get_training_data(req: Request, organism: Optional[str] = None, limit: int = 1000):
+    """
+    Get training data for molecular generation models.
+
+    Returns SMILES strings with experimental MIC values from ChEMBL,
+    suitable for fine-tuning molecular generation models.
+    """
+    chembl_fetcher = getattr(req.app.state, "chembl_fetcher", None)
+    reference_db = getattr(req.app.state, "reference_db", None)
+
+    training_data = []
+
+    # Get ChEMBL experimental data
+    if chembl_fetcher and chembl_fetcher.is_ready:
+        chembl_data = chembl_fetcher.get_training_data()
+
+        # Filter by organism if specified
+        if organism:
+            chembl_data = [
+                d for d in chembl_data
+                if organism.lower() in d.get("organism", "").lower()
+            ]
+
+        training_data.extend(chembl_data)
+
+    # Add reference compound data
+    if reference_db and reference_db.is_ready:
+        for ref in reference_db.get_all():
+            for org, mic_range in ref.mic_ranges.items():
+                # Use geometric mean of min/max as representative MIC
+                mic_mean = (mic_range["min"] * mic_range["max"]) ** 0.5
+
+                if organism and organism.lower() not in org.lower():
+                    continue
+
+                training_data.append({
+                    "smiles": ref.smiles,
+                    "organism": org,
+                    "mic_value": mic_mean,
+                    "chembl_id": ref.chembl_id,
+                    "name": ref.name,
+                    "source": "reference"
+                })
+
+    # Apply limit
+    if len(training_data) > limit:
+        training_data = training_data[:limit]
+
+    return {
+        "count": len(training_data),
+        "data": training_data
+    }
+
+
+@router.get("/smiles-corpus")
+async def get_smiles_corpus(req: Request, include_reference: bool = True):
+    """
+    Get list of SMILES strings for training molecular generation models.
+
+    Returns unique SMILES from both ChEMBL and reference databases.
+    """
+    chembl_fetcher = getattr(req.app.state, "chembl_fetcher", None)
+    reference_db = getattr(req.app.state, "reference_db", None)
+
+    smiles_set = set()
+
+    # Get ChEMBL SMILES
+    if chembl_fetcher and chembl_fetcher.is_ready:
+        smiles_set.update(chembl_fetcher.get_smiles_list())
+
+    # Get reference SMILES
+    if include_reference and reference_db and reference_db.is_ready:
+        smiles_set.update(reference_db.get_smiles_list())
+
+    smiles_list = list(smiles_set)
+
+    return {
+        "count": len(smiles_list),
+        "smiles": smiles_list
+    }

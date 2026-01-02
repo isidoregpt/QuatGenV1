@@ -11,6 +11,7 @@ import logging
 from api.routes import molecules, generator, export, status
 from database.connection import init_db, close_db
 from generator.engine import GeneratorEngine
+from data import ChEMBLFetcher, ReferenceDatabase
 
 # Configure logging
 logging.basicConfig(
@@ -22,29 +23,45 @@ logger = logging.getLogger(__name__)
 # Global generator engine instance
 generator_engine: GeneratorEngine | None = None
 
+# Global data fetchers
+chembl_fetcher: ChEMBLFetcher | None = None
+reference_db: ReferenceDatabase | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    global generator_engine
-    
+    global generator_engine, chembl_fetcher, reference_db
+
     # Startup
     logger.info("Starting Quat Generator Pro backend...")
-    
+
     # Initialize database
     await init_db()
     logger.info("Database initialized")
-    
+
+    # Initialize reference database (curated compounds - fast, no network)
+    reference_db = ReferenceDatabase()
+    await reference_db.initialize()
+    logger.info(f"Reference database initialized: {reference_db.compound_count} compounds")
+
+    # Initialize ChEMBL fetcher (experimental data from ChEMBL)
+    chembl_fetcher = ChEMBLFetcher(cache_dir="data/chembl_cache")
+    await chembl_fetcher.initialize()
+    logger.info(f"ChEMBL fetcher initialized: {chembl_fetcher.compound_count} compounds cached")
+
     # Initialize generator engine
     generator_engine = GeneratorEngine()
     await generator_engine.initialize()
     logger.info("Generator engine initialized")
-    
+
     # Store in app state for access in routes
     app.state.generator = generator_engine
-    
+    app.state.chembl_fetcher = chembl_fetcher
+    app.state.reference_db = reference_db
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down...")
     if generator_engine:
@@ -93,7 +110,9 @@ async def health():
     return {
         "status": "healthy",
         "database": "connected",
-        "generator": "ready" if generator_engine and generator_engine.is_ready else "initializing"
+        "generator": "ready" if generator_engine and generator_engine.is_ready else "initializing",
+        "chembl_fetcher": "ready" if chembl_fetcher and chembl_fetcher.is_ready else "initializing",
+        "reference_db": "ready" if reference_db and reference_db.is_ready else "initializing"
     }
 
 
