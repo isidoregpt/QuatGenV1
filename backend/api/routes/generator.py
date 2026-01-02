@@ -230,3 +230,289 @@ async def get_smiles_corpus(req: Request, include_reference: bool = True):
         "count": len(smiles_list),
         "smiles": smiles_list
     }
+
+
+# ============================================================================
+# REINVENT RL Fine-Tuning Endpoints
+# ============================================================================
+
+class RLTrainingRequest(BaseModel):
+    """Request model for RL training"""
+    constraints: GenerationConstraints = GenerationConstraints()
+    weights: GenerationWeights = GenerationWeights()
+    max_steps: int = Field(100, ge=1, le=10000)
+
+
+class RLGenerationRequest(BaseModel):
+    """Request model for RL-guided generation"""
+    num_molecules: int = Field(100, ge=1, le=10000)
+    constraints: GenerationConstraints = GenerationConstraints()
+    weights: GenerationWeights = GenerationWeights()
+    rl_steps: int = Field(100, ge=1, le=1000)
+    batch_size: int = Field(64, ge=1, le=512)
+
+
+class RLConfigUpdate(BaseModel):
+    """Model for updating RL configuration"""
+    sigma: Optional[float] = Field(None, ge=1, le=200)
+    learning_rate: Optional[float] = Field(None, ge=1e-6, le=1e-2)
+    diversity_filter: Optional[bool] = None
+    similarity_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
+    kl_weight: Optional[float] = Field(None, ge=0.0, le=1.0)
+
+
+@router.get("/rl/status")
+async def get_rl_status(req: Request):
+    """
+    Get REINVENT RL training status and metrics.
+
+    Returns current training state, configuration, and performance metrics.
+    """
+    generator = req.app.state.generator
+    return generator.rl_training_status
+
+
+@router.post("/rl/start")
+async def start_rl_training(
+    request: RLTrainingRequest,
+    background_tasks: BackgroundTasks,
+    req: Request
+):
+    """
+    Start REINVENT RL fine-tuning loop.
+
+    This trains the agent model to optimize for the specified scoring weights
+    while maintaining similarity to the prior model.
+    """
+    generator = req.app.state.generator
+
+    if not generator.reinvent_trainer:
+        raise HTTPException(
+            status_code=503,
+            detail="REINVENT trainer not initialized. Ensure pretrained model is loaded."
+        )
+
+    if generator.rl_training_active:
+        raise HTTPException(status_code=409, detail="RL training already in progress")
+
+    if generator.is_running:
+        raise HTTPException(status_code=409, detail="Generation already in progress")
+
+    # Validate weights
+    total_weight = (
+        request.weights.efficacy + request.weights.safety +
+        request.weights.environmental + request.weights.sa_score
+    )
+    if abs(total_weight - 1.0) > 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Weights must sum to 1.0 (got {total_weight})"
+        )
+
+    # Create scoring function
+    scoring_function = generator.create_rl_scoring_function(
+        request.constraints.model_dump(),
+        request.weights.model_dump()
+    )
+
+    # Run RL training in background
+    background_tasks.add_task(
+        generator.start_rl_training,
+        scoring_function=scoring_function,
+        max_steps=request.max_steps
+    )
+
+    return {
+        "status": "started",
+        "max_steps": request.max_steps,
+        "config": {
+            "sigma": generator.config.rl_sigma,
+            "learning_rate": generator.config.learning_rate,
+            "diversity_filter": generator.config.rl_diversity_filter,
+        }
+    }
+
+
+@router.post("/rl/stop")
+async def stop_rl_training(req: Request):
+    """Stop ongoing RL training"""
+    generator = req.app.state.generator
+
+    if not generator.rl_training_active:
+        raise HTTPException(status_code=400, detail="No RL training in progress")
+
+    await generator.stop_rl_training()
+
+    return {
+        "status": "stopped",
+        "final_metrics": generator.rl_training_status.get("metrics")
+    }
+
+
+@router.post("/rl/generate")
+async def start_rl_generation(
+    request: RLGenerationRequest,
+    background_tasks: BackgroundTasks,
+    req: Request
+):
+    """
+    Start RL-guided molecule generation.
+
+    This combines RL fine-tuning with molecule generation, training the model
+    while simultaneously generating and storing valid molecules.
+    """
+    generator = req.app.state.generator
+
+    if generator.is_running:
+        raise HTTPException(status_code=409, detail="Generation already in progress")
+
+    if generator.rl_training_active:
+        raise HTTPException(status_code=409, detail="RL training already in progress")
+
+    # Validate weights
+    total_weight = (
+        request.weights.efficacy + request.weights.safety +
+        request.weights.environmental + request.weights.sa_score
+    )
+    if abs(total_weight - 1.0) > 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Weights must sum to 1.0 (got {total_weight})"
+        )
+
+    # Run RL generation in background
+    background_tasks.add_task(
+        generator.run_rl_generation,
+        num_molecules=request.num_molecules,
+        constraints=request.constraints.model_dump(),
+        weights=request.weights.model_dump(),
+        rl_steps=request.rl_steps,
+        batch_size=request.batch_size
+    )
+
+    return {
+        "status": "started",
+        "target_molecules": request.num_molecules,
+        "rl_steps": request.rl_steps,
+        "rl_available": generator.reinvent_trainer is not None
+    }
+
+
+@router.patch("/rl/config")
+async def update_rl_config(config: RLConfigUpdate, req: Request):
+    """
+    Update RL training configuration.
+
+    Changes take effect on the next training run.
+    """
+    generator = req.app.state.generator
+
+    if generator.rl_training_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot update config while RL training is active"
+        )
+
+    updates = {}
+
+    if config.sigma is not None:
+        generator.config.rl_sigma = config.sigma
+        updates["sigma"] = config.sigma
+
+    if config.learning_rate is not None:
+        generator.config.learning_rate = config.learning_rate
+        updates["learning_rate"] = config.learning_rate
+
+    if config.diversity_filter is not None:
+        generator.config.rl_diversity_filter = config.diversity_filter
+        updates["diversity_filter"] = config.diversity_filter
+
+    if config.similarity_threshold is not None:
+        generator.config.rl_similarity_threshold = config.similarity_threshold
+        updates["similarity_threshold"] = config.similarity_threshold
+
+    if config.kl_weight is not None:
+        generator.config.rl_kl_weight = config.kl_weight
+        updates["kl_weight"] = config.kl_weight
+
+    # Re-initialize trainer with new config if it exists
+    if updates and generator.reinvent_trainer:
+        await generator._setup_reinvent_trainer()
+
+    return {
+        "status": "updated",
+        "changes": updates,
+        "current_config": {
+            "sigma": generator.config.rl_sigma,
+            "learning_rate": generator.config.learning_rate,
+            "diversity_filter": generator.config.rl_diversity_filter,
+            "similarity_threshold": generator.config.rl_similarity_threshold,
+            "kl_weight": generator.config.rl_kl_weight,
+        }
+    }
+
+
+@router.get("/rl/replay-buffer")
+async def get_replay_buffer(req: Request, limit: int = 100):
+    """
+    Get top molecules from the experience replay buffer.
+
+    Returns the highest-scoring molecules seen during RL training.
+    """
+    generator = req.app.state.generator
+
+    if not generator.reinvent_trainer:
+        raise HTTPException(
+            status_code=503,
+            detail="REINVENT trainer not initialized"
+        )
+
+    # Get top entries from replay buffer
+    entries = generator.reinvent_trainer.replay_buffer.sample(
+        min(limit, len(generator.reinvent_trainer.replay_buffer))
+    )
+
+    return {
+        "count": len(entries),
+        "buffer_size": len(generator.reinvent_trainer.replay_buffer),
+        "molecules": [
+            {
+                "smiles": e.smiles,
+                "score": e.score,
+                "prior_nll": e.prior_nll,
+                "agent_nll": e.agent_nll,
+            }
+            for e in entries
+        ]
+    }
+
+
+@router.post("/rl/reset")
+async def reset_rl_trainer(req: Request):
+    """
+    Reset the REINVENT trainer.
+
+    This clears the replay buffer and diversity filter, and reinitializes
+    the agent model from the prior.
+    """
+    generator = req.app.state.generator
+
+    if generator.rl_training_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot reset while RL training is active"
+        )
+
+    if not generator.pretrained_generator or not generator.pretrained_generator.is_ready:
+        raise HTTPException(
+            status_code=503,
+            detail="Pretrained model not available for reset"
+        )
+
+    # Re-setup the trainer (creates new agent from prior)
+    await generator._setup_reinvent_trainer()
+
+    return {
+        "status": "reset",
+        "message": "REINVENT trainer reset successfully"
+    }
