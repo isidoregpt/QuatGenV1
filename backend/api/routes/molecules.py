@@ -546,3 +546,169 @@ async def get_sa_score_interpretation():
             "0-40": "Quaternization may be challenging"
         }
     }
+
+
+# ============================================================================
+# Molecular Filtering and Diversity Endpoints
+# ============================================================================
+
+class FilterBatchRequest(BaseModel):
+    smiles_list: List[str]
+
+
+class FilterSingleRequest(BaseModel):
+    smiles: str
+
+
+class DiversitySelectRequest(BaseModel):
+    smiles_list: List[str]
+    scores: Optional[List[float]] = None
+    n_select: int = Field(50, ge=1, le=1000)
+    strategy: str = Field("maxmin", pattern="^(maxmin|leader)$")
+
+
+class DiversityMetricsRequest(BaseModel):
+    smiles_list: List[str]
+
+
+@router.post("/filter")
+async def filter_molecules_batch(
+    filter_request: FilterBatchRequest,
+    request: Request
+):
+    """
+    Filter a batch of molecules and return detailed reports.
+
+    Applies validity, quat-specific, property range, PAINS, and Brenk filters.
+    """
+    generator = request.app.state.generator
+
+    if not generator or not generator.molecular_filter:
+        raise HTTPException(status_code=503, detail="Molecular filter not available")
+
+    passed, reports = generator.molecular_filter.filter_batch(filter_request.smiles_list)
+    rejection_summary = generator.molecular_filter.get_rejection_summary(reports)
+
+    return {
+        "total": len(filter_request.smiles_list),
+        "passed": len(passed),
+        "passed_smiles": passed,
+        "rejection_summary": rejection_summary,
+        "detailed_reports": [
+            {
+                "smiles": r.smiles,
+                "is_valid": r.is_valid,
+                "passed_all": r.passed_all,
+                "rejection_reasons": r.rejection_reasons,
+                "warnings": r.warnings,
+                "properties": r.properties
+            }
+            for r in reports
+        ]
+    }
+
+
+@router.post("/filter/single")
+async def filter_single_molecule(
+    filter_request: FilterSingleRequest,
+    request: Request
+):
+    """
+    Get detailed filter report for a single molecule.
+
+    Returns comprehensive validation results including property calculations.
+    """
+    generator = request.app.state.generator
+
+    if not generator or not generator.molecular_filter:
+        raise HTTPException(status_code=503, detail="Molecular filter not available")
+
+    report = generator.molecular_filter.filter_molecule(filter_request.smiles)
+
+    return {
+        "smiles": report.smiles,
+        "is_valid": report.is_valid,
+        "passed_all": report.passed_all,
+        "filter_results": {k: v.value for k, v in report.filter_results.items()},
+        "rejection_reasons": report.rejection_reasons,
+        "warnings": report.warnings,
+        "properties": report.properties
+    }
+
+
+@router.post("/diversity/select")
+async def select_diverse_molecules(
+    diversity_request: DiversitySelectRequest,
+    request: Request
+):
+    """
+    Select a diverse subset of molecules using Tanimoto diversity.
+
+    Strategies:
+    - maxmin: Maximize minimum distance to selected set (better coverage)
+    - leader: Greedy leader-picker (faster)
+    """
+    generator = request.app.state.generator
+
+    if not generator or not generator.diversity_selector:
+        raise HTTPException(status_code=503, detail="Diversity selector not available")
+
+    if diversity_request.scores and len(diversity_request.scores) != len(diversity_request.smiles_list):
+        raise HTTPException(status_code=400, detail="Scores length must match SMILES length")
+
+    selected = generator.diversity_selector.select_diverse(
+        diversity_request.smiles_list,
+        diversity_request.scores,
+        diversity_request.n_select,
+        diversity_request.strategy
+    )
+
+    # Calculate diversity metrics for selected set
+    selected_smiles = [s for s, _ in selected]
+    metrics = generator.diversity_selector.calculate_diversity_metrics(selected_smiles)
+
+    return {
+        "selected_count": len(selected),
+        "requested": diversity_request.n_select,
+        "input_count": len(diversity_request.smiles_list),
+        "selected": [{"smiles": s, "score": sc} for s, sc in selected],
+        "diversity_metrics": metrics
+    }
+
+
+@router.post("/diversity/metrics")
+async def calculate_diversity_metrics(
+    metrics_request: DiversityMetricsRequest,
+    request: Request
+):
+    """
+    Calculate diversity metrics for a set of molecules.
+
+    Returns mean, min, max, and std of pairwise Tanimoto distances.
+    """
+    generator = request.app.state.generator
+
+    if not generator or not generator.diversity_selector:
+        raise HTTPException(status_code=503, detail="Diversity selector not available")
+
+    metrics = generator.diversity_selector.calculate_diversity_metrics(
+        metrics_request.smiles_list
+    )
+
+    return metrics
+
+
+@router.get("/filter/patterns")
+async def get_filter_patterns():
+    """
+    Get the SMARTS patterns used for filtering.
+
+    Returns quat detection patterns, counterion patterns, and exclusion patterns.
+    """
+    from generator.filters import MolecularFilter
+
+    return {
+        "quat_patterns": MolecularFilter.QUAT_PATTERNS,
+        "counterion_patterns": MolecularFilter.COUNTERION_PATTERNS,
+        "exclusion_patterns": MolecularFilter.QUAT_EXCLUSIONS
+    }

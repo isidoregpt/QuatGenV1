@@ -13,6 +13,7 @@ from generator.policy import MoleculePolicy, PolicyOptimizer
 from generator.constraints import QuatConstraints, validate_quat
 from generator.pretrained_model import PretrainedMoleculeGenerator
 from generator.reinvent import ReinventTrainer, ReinventConfig, TrainingMetrics
+from generator.filters import MolecularFilter, FilterConfig, DiversitySelector
 from scoring.pipeline import ScoringPipeline
 from database.connection import get_db_context
 from database import queries
@@ -99,6 +100,9 @@ class GeneratorEngine:
         self.reinvent_trainer: Optional[ReinventTrainer] = None
         self.rl_training_active = False
         self._rl_metrics: Optional[TrainingMetrics] = None
+        # Molecular filtering and diversity
+        self.molecular_filter: Optional[MolecularFilter] = None
+        self.diversity_selector: Optional[DiversitySelector] = None
     
     @property
     def is_ready(self) -> bool:
@@ -241,6 +245,18 @@ class GeneratorEngine:
         # Initialize REINVENT trainer if RL fine-tuning is enabled
         if self.config.use_rl_finetuning and self._use_pretrained_for_generation:
             await self._setup_reinvent_trainer()
+
+        # Setup molecular filters
+        filter_config = FilterConfig(
+            min_mw=150.0,
+            max_mw=800.0,
+            require_quaternary_nitrogen=True,
+            apply_pains_filter=True,
+            apply_brenk_filter=True,
+        )
+        self.molecular_filter = MolecularFilter(filter_config)
+        self.diversity_selector = DiversitySelector(similarity_threshold=0.7)
+        logger.info("Molecular filters initialized")
 
         logger.info("Generator engine ready")
     
@@ -592,3 +608,26 @@ class GeneratorEngine:
             return loop.run_until_complete(self.scoring.score_molecule(smiles))
         finally:
             loop.close()
+
+    async def filter_molecules(self, smiles_list: List[str]) -> tuple:
+        """Filter molecules and return passed ones with statistics"""
+        if not self.molecular_filter:
+            return smiles_list, {"filtered": 0, "passed": len(smiles_list)}
+
+        passed, reports = self.molecular_filter.filter_batch(smiles_list)
+        rejection_summary = self.molecular_filter.get_rejection_summary(reports)
+
+        return passed, {
+            "total": len(smiles_list),
+            "passed": len(passed),
+            "filtered": len(smiles_list) - len(passed),
+            "rejection_reasons": rejection_summary
+        }
+
+    async def select_diverse(self, smiles_list: List[str], scores: List[float],
+                            n_select: int = 100) -> List[tuple]:
+        """Select diverse subset of molecules"""
+        if not self.diversity_selector:
+            return list(zip(smiles_list[:n_select], scores[:n_select]))
+
+        return self.diversity_selector.select_diverse(smiles_list, scores, n_select)

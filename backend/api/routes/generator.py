@@ -516,3 +516,193 @@ async def reset_rl_trainer(req: Request):
         "status": "reset",
         "message": "REINVENT trainer reset successfully"
     }
+
+
+# ============================================================================
+# Molecular Filter Configuration Endpoints
+# ============================================================================
+
+class FilterConfigUpdate(BaseModel):
+    """Model for updating filter configuration"""
+    require_quaternary_nitrogen: Optional[bool] = None
+    min_mw: Optional[float] = Field(None, ge=50, le=2000)
+    max_mw: Optional[float] = Field(None, ge=50, le=2000)
+    min_logp: Optional[float] = Field(None, ge=-10, le=20)
+    max_logp: Optional[float] = Field(None, ge=-10, le=20)
+    max_hbd: Optional[int] = Field(None, ge=0, le=20)
+    max_hba: Optional[int] = Field(None, ge=0, le=30)
+    max_rotatable_bonds: Optional[int] = Field(None, ge=0, le=50)
+    max_tpsa: Optional[float] = Field(None, ge=0, le=500)
+    min_chain_length: Optional[int] = Field(None, ge=0, le=30)
+    max_chain_length: Optional[int] = Field(None, ge=0, le=30)
+    apply_pains_filter: Optional[bool] = None
+    apply_brenk_filter: Optional[bool] = None
+    apply_veber: Optional[bool] = None
+    diversity_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
+
+
+@router.get("/filters/config")
+async def get_filter_config(req: Request):
+    """
+    Get current molecular filter configuration.
+
+    Returns all filter settings including property ranges and enabled filters.
+    """
+    generator = req.app.state.generator
+
+    if not generator or not generator.molecular_filter:
+        return {"available": False, "reason": "Molecular filter not initialized"}
+
+    config = generator.molecular_filter.config
+
+    return {
+        "available": True,
+        "config": {
+            "validity": {
+                "require_valid_smiles": config.require_valid_smiles,
+                "require_sanitization": config.require_sanitization,
+            },
+            "quat_specific": {
+                "require_quaternary_nitrogen": config.require_quaternary_nitrogen,
+                "min_quat_nitrogens": config.min_quat_nitrogens,
+                "max_quat_nitrogens": config.max_quat_nitrogens,
+                "allowed_counterions": config.allowed_counterions,
+            },
+            "property_ranges": {
+                "min_mw": config.min_mw,
+                "max_mw": config.max_mw,
+                "min_logp": config.min_logp,
+                "max_logp": config.max_logp,
+                "max_hbd": config.max_hbd,
+                "max_hba": config.max_hba,
+                "max_rotatable_bonds": config.max_rotatable_bonds,
+                "max_tpsa": config.max_tpsa,
+            },
+            "chain_length": {
+                "min_chain_length": config.min_chain_length,
+                "max_chain_length": config.max_chain_length,
+            },
+            "structural": {
+                "max_rings": config.max_rings,
+                "max_ring_size": config.max_ring_size,
+                "max_stereocenters": config.max_stereocenters,
+            },
+            "alerts": {
+                "apply_pains_filter": config.apply_pains_filter,
+                "apply_brenk_filter": config.apply_brenk_filter,
+                "apply_nih_filter": config.apply_nih_filter,
+            },
+            "drug_likeness": {
+                "apply_lipinski": config.apply_lipinski,
+                "apply_veber": config.apply_veber,
+            },
+            "diversity": {
+                "diversity_threshold": config.diversity_threshold,
+            }
+        }
+    }
+
+
+@router.patch("/filters/config")
+async def update_filter_config(config_update: FilterConfigUpdate, req: Request):
+    """
+    Update molecular filter configuration.
+
+    Changes take effect immediately for subsequent filtering operations.
+    """
+    generator = req.app.state.generator
+
+    if not generator or not generator.molecular_filter:
+        raise HTTPException(status_code=503, detail="Molecular filter not available")
+
+    config = generator.molecular_filter.config
+    updates = {}
+
+    # Apply updates
+    update_dict = config_update.model_dump(exclude_none=True)
+    for key, value in update_dict.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+            updates[key] = value
+
+    # Also update diversity selector threshold if provided
+    if config_update.diversity_threshold is not None and generator.diversity_selector:
+        generator.diversity_selector.similarity_threshold = config_update.diversity_threshold
+
+    # Re-setup filter catalogs if PAINS/Brenk settings changed
+    if "apply_pains_filter" in updates or "apply_brenk_filter" in updates:
+        generator.molecular_filter._setup_filter_catalogs()
+
+    return {
+        "status": "updated",
+        "changes": updates,
+        "message": f"Updated {len(updates)} configuration options"
+    }
+
+
+@router.get("/filters/status")
+async def get_filter_status(req: Request):
+    """
+    Get status of molecular filtering components.
+
+    Returns availability and configuration summary.
+    """
+    generator = req.app.state.generator
+
+    if not generator:
+        return {"available": False, "reason": "Generator not initialized"}
+
+    filter_available = generator.molecular_filter is not None
+    diversity_available = generator.diversity_selector is not None
+
+    status = {
+        "filter_available": filter_available,
+        "diversity_available": diversity_available,
+    }
+
+    if filter_available:
+        config = generator.molecular_filter.config
+        status["filter_config_summary"] = {
+            "require_quat": config.require_quaternary_nitrogen,
+            "mw_range": f"{config.min_mw}-{config.max_mw}",
+            "pains_enabled": config.apply_pains_filter,
+            "brenk_enabled": config.apply_brenk_filter,
+        }
+        status["pains_catalog_loaded"] = generator.molecular_filter._pains_catalog is not None
+        status["brenk_catalog_loaded"] = generator.molecular_filter._brenk_catalog is not None
+
+    if diversity_available:
+        status["diversity_config"] = {
+            "similarity_threshold": generator.diversity_selector.similarity_threshold,
+            "fingerprint_cache_size": len(generator.diversity_selector),
+        }
+
+    return status
+
+
+@router.post("/filters/reset")
+async def reset_filters(req: Request):
+    """
+    Reset molecular filters to default configuration.
+
+    This re-initializes filters with default settings.
+    """
+    generator = req.app.state.generator
+
+    if not generator:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    from generator.filters import MolecularFilter, FilterConfig, DiversitySelector
+
+    # Reset filter with default config
+    generator.molecular_filter = MolecularFilter(FilterConfig())
+
+    # Reset diversity selector and clear cache
+    if generator.diversity_selector:
+        generator.diversity_selector.clear_cache()
+    generator.diversity_selector = DiversitySelector(similarity_threshold=0.7)
+
+    return {
+        "status": "reset",
+        "message": "Molecular filters reset to defaults"
+    }
