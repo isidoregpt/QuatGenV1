@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-from api.routes import molecules, generator, export, status
+from api.routes import molecules, generator, export, status, search
 from database.connection import init_db, close_db
 from generator.engine import GeneratorEngine
 from data import ChEMBLFetcher, ReferenceDatabase
@@ -103,6 +103,7 @@ app.include_router(molecules.router, prefix="/api/molecules", tags=["molecules"]
 app.include_router(generator.router, prefix="/api/generator", tags=["generator"])
 app.include_router(export.router, prefix="/api/export", tags=["export"])
 app.include_router(status.router, prefix="/api/status", tags=["status"])
+app.include_router(search.router, prefix="/api/search", tags=["search"])
 
 
 @app.get("/")
