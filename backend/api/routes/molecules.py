@@ -413,3 +413,136 @@ async def get_mic_predictor_status(request: Request):
         "has_statistics": len(mic_predictor.mic_statistics) > 0,
         "activity_thresholds": mic_predictor.MIC_THRESHOLDS
     }
+
+
+# Synthesis Analysis Endpoints
+
+def _get_synthesis_recommendations(sa_result: dict) -> List[str]:
+    """Generate synthesis recommendations based on SA analysis"""
+    recommendations = []
+
+    components = sa_result.get("components", {})
+    problematic = sa_result.get("problematic_groups", [])
+
+    if components.get("stereo_penalty", 0) > 1:
+        recommendations.append("Consider racemic synthesis or asymmetric catalysis for stereocenters")
+
+    if components.get("ring_penalty", 0) > 1:
+        recommendations.append("Complex ring systems may require multi-step synthesis")
+
+    if components.get("estimated_steps", 0) > 8:
+        recommendations.append("Long synthetic route - consider retrosynthetic simplification")
+
+    if "azide" in problematic:
+        recommendations.append("Azide groups require careful handling - consider click chemistry")
+
+    if "peroxide" in problematic:
+        recommendations.append("Peroxide groups are unstable - consider alternative oxidation states")
+
+    if "epoxide" in problematic:
+        recommendations.append("Epoxide groups are reactive - plan ring-opening carefully")
+
+    if "aziridine" in problematic:
+        recommendations.append("Aziridine groups are strained - handle with care")
+
+    quat_score = components.get("quat_synthesis", 50)
+    if quat_score > 70:
+        recommendations.append("Favorable for quaternization via Menshutkin reaction")
+    elif quat_score < 40:
+        recommendations.append("Quaternization may be challenging - consider simpler alkyl groups")
+
+    if not recommendations:
+        recommendations.append("Standard synthetic approaches should be applicable")
+
+    return recommendations
+
+
+class SynthesisAnalyzeRequest(BaseModel):
+    smiles: str
+
+
+@router.get("/{molecule_id}/synthesis")
+async def get_synthesis_analysis(
+    molecule_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get detailed synthetic accessibility analysis for a molecule."""
+    molecule = await queries.get_molecule_by_id(db, molecule_id)
+    if not molecule:
+        raise HTTPException(status_code=404, detail="Molecule not found")
+
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.sa_scorer:
+        raise HTTPException(status_code=503, detail="SA scorer not available")
+
+    sa_result = await pipeline.sa_scorer.score(molecule.smiles)
+
+    return {
+        "molecule_id": molecule_id,
+        "smiles": molecule.smiles,
+        "sa_score": sa_result.get("score"),
+        "sa_score_raw": sa_result.get("components", {}).get("sa_score_raw"),
+        "components": sa_result.get("components", {}),
+        "problematic_groups": sa_result.get("problematic_groups", []),
+        "confidence": sa_result.get("confidence", 0.5),
+        "recommendations": _get_synthesis_recommendations(sa_result)
+    }
+
+
+@router.post("/synthesis/analyze")
+async def analyze_synthesis(
+    synthesis_request: SynthesisAnalyzeRequest,
+    request: Request
+):
+    """Analyze synthetic accessibility for any SMILES string."""
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.sa_scorer:
+        raise HTTPException(status_code=503, detail="SA scorer not available")
+
+    sa_result = await pipeline.sa_scorer.score(synthesis_request.smiles)
+
+    return {
+        "smiles": synthesis_request.smiles,
+        "sa_score": sa_result.get("score"),
+        "sa_score_raw": sa_result.get("components", {}).get("sa_score_raw"),
+        "components": sa_result.get("components", {}),
+        "problematic_groups": sa_result.get("problematic_groups", []),
+        "confidence": sa_result.get("confidence", 0.5),
+        "recommendations": _get_synthesis_recommendations(sa_result)
+    }
+
+
+@router.get("/synthesis/interpretation")
+async def get_sa_score_interpretation():
+    """Get interpretation guide for SA scores."""
+    return {
+        "scale": {
+            "raw_sa_score": "1-10 scale where 1=very easy, 10=very hard",
+            "normalized_score": "0-100 scale where 100=very easy, 0=very hard"
+        },
+        "thresholds": {
+            "90-100": {"raw": "1-2", "description": "Very easy - simple compounds"},
+            "70-90": {"raw": "2-4", "description": "Easy - drug-like complexity"},
+            "45-70": {"raw": "4-6", "description": "Moderate - typical pharma complexity"},
+            "25-45": {"raw": "6-8", "description": "Difficult - complex synthesis required"},
+            "0-25": {"raw": "8-10", "description": "Very difficult - natural product-like complexity"}
+        },
+        "penalties": {
+            "stereo_penalty": "0.5 per chiral center, 0.25 per stereo double bond",
+            "macrocycle_penalty": "0.3 * (ring_size - 8) for rings > 8 atoms",
+            "spiro_penalty": "0.75 per spiro center",
+            "bridged_penalty": "1.0 per bridged ring system"
+        },
+        "quat_synthesis_interpretation": {
+            "70-100": "Favorable for Menshutkin quaternization",
+            "40-70": "Standard quaternization should work",
+            "0-40": "Quaternization may be challenging"
+        }
+    }
