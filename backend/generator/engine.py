@@ -11,6 +11,7 @@ import numpy as np
 from generator.tokenizer import SMIAISTokenizer
 from generator.policy import MoleculePolicy, PolicyOptimizer
 from generator.constraints import QuatConstraints, validate_quat
+from generator.pretrained_model import PretrainedMoleculeGenerator
 from scoring.pipeline import ScoringPipeline
 from database.connection import get_db_context
 from database import queries
@@ -20,20 +21,27 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class GenerationConfig:
+    # Pretrained model settings
+    use_pretrained: bool = True
+    pretrained_model_name: str = "Franso/reinvent_171M_prior"
+    # Random policy settings (used as fallback or when use_pretrained=False)
     vocab_size: int = 500
     d_model: int = 256
     n_heads: int = 8
     n_layers: int = 6
     d_ff: int = 1024
     max_len: int = 128
+    # Generation settings
     temperature: float = 1.0
     top_k: int = 50
     top_p: float = 0.95
+    # Training settings
     learning_rate: float = 1e-4
     gamma: float = 0.99
     gae_lambda: float = 0.95
     policy_weight: float = 1.0
     value_weight: float = 0.5
+    # Device settings
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     num_workers: int = 8
 
@@ -75,11 +83,20 @@ class GeneratorEngine:
         self.policy: Optional[MoleculePolicy] = None
         self.optimizer: Optional[PolicyOptimizer] = None
         self.scoring: Optional[ScoringPipeline] = None
+        self.pretrained_generator: Optional[PretrainedMoleculeGenerator] = None
+        self._use_pretrained_for_generation = False
         self._stop_requested = False
     
     @property
     def is_ready(self) -> bool:
-        return self.policy is not None and self.scoring is not None
+        generator_ready = self.policy is not None or (
+            self.pretrained_generator is not None and self.pretrained_generator.is_ready
+        )
+        return generator_ready and self.scoring is not None
+
+    @property
+    def using_pretrained(self) -> bool:
+        return self._use_pretrained_for_generation
     
     @property
     def is_running(self) -> bool:
@@ -132,15 +149,45 @@ class GeneratorEngine:
     
     async def initialize(self):
         logger.info("Initializing generator engine...")
-        self.tokenizer = SMIAISTokenizer()
-        self.policy = MoleculePolicy(vocab_size=self.tokenizer.vocab_size, d_model=self.config.d_model,
-                                     n_heads=self.config.n_heads, n_layers=self.config.n_layers,
-                                     d_ff=self.config.d_ff, max_len=self.config.max_len,
-                                     pad_token_id=self.tokenizer.pad_token_id)
-        self.policy.to(self.config.device)
-        self.optimizer = PolicyOptimizer(self.policy, lr=self.config.learning_rate)
+
+        # Initialize scoring pipeline first (always needed)
         self.scoring = ScoringPipeline()
         await self.scoring.initialize()
+
+        # Try to load pretrained model if configured
+        if self.config.use_pretrained:
+            logger.info(f"Attempting to load pretrained model: {self.config.pretrained_model_name}")
+            self.pretrained_generator = PretrainedMoleculeGenerator(
+                model_name=self.config.pretrained_model_name,
+                device=self.config.device
+            )
+            success = await self.pretrained_generator.initialize()
+
+            if success:
+                self._use_pretrained_for_generation = True
+                # Use pretrained tokenizer for encoding/decoding
+                logger.info("Using pretrained model for generation")
+            else:
+                logger.warning("Pretrained model failed to load, falling back to random policy")
+                self._use_pretrained_for_generation = False
+
+        # Always initialize the fallback policy (needed for RL training)
+        self.tokenizer = SMIAISTokenizer()
+        self.policy = MoleculePolicy(
+            vocab_size=self.tokenizer.vocab_size,
+            d_model=self.config.d_model,
+            n_heads=self.config.n_heads,
+            n_layers=self.config.n_layers,
+            d_ff=self.config.d_ff,
+            max_len=self.config.max_len,
+            pad_token_id=self.tokenizer.pad_token_id
+        )
+        self.policy.to(self.config.device)
+        self.optimizer = PolicyOptimizer(self.policy, lr=self.config.learning_rate)
+
+        if not self._use_pretrained_for_generation:
+            logger.info("Using random policy for generation")
+
         logger.info("Generator engine ready")
     
     async def shutdown(self):
@@ -179,12 +226,28 @@ class GeneratorEngine:
             await asyncio.sleep(0.1)
     
     async def _generate_batch(self, batch_size: int) -> List[str]:
-        self.policy.eval()
-        with torch.no_grad():
-            sequences, _ = self.policy.generate(batch_size=batch_size, bos_token_id=self.tokenizer.bos_token_id,
-                                                eos_token_id=self.tokenizer.eos_token_id, temperature=self.config.temperature,
-                                                top_k=self.config.top_k, device=self.config.device)
-        return [self.tokenizer.decode(seq.tolist()) for seq in sequences]
+        if self._use_pretrained_for_generation and self.pretrained_generator is not None:
+            # Use pretrained model for generation
+            return self.pretrained_generator.generate(
+                batch_size=batch_size,
+                temperature=self.config.temperature,
+                top_k=self.config.top_k,
+                top_p=self.config.top_p,
+                max_length=self.config.max_len
+            )
+        else:
+            # Use random policy as fallback
+            self.policy.eval()
+            with torch.no_grad():
+                sequences, _ = self.policy.generate(
+                    batch_size=batch_size,
+                    bos_token_id=self.tokenizer.bos_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    temperature=self.config.temperature,
+                    top_k=self.config.top_k,
+                    device=self.config.device
+                )
+            return [self.tokenizer.decode(seq.tolist()) for seq in sequences]
     
     async def _score_batch(self, smiles_list: List[str], constraints: QuatConstraints):
         valid_smiles, scores = [], []
@@ -247,8 +310,20 @@ class GeneratorEngine:
         self.state = GenerationState()
     
     def get_config(self) -> dict:
-        return {"model_path": "models/policy.pt", "vocab_size": self.vocab_size, "hidden_size": self.config.d_model,
-                "num_layers": self.config.n_layers, "learning_rate": self.config.learning_rate, "temperature": self.config.temperature}
+        config = {
+            "model_path": "models/policy.pt",
+            "vocab_size": self.vocab_size,
+            "hidden_size": self.config.d_model,
+            "num_layers": self.config.n_layers,
+            "learning_rate": self.config.learning_rate,
+            "temperature": self.config.temperature,
+            "use_pretrained": self.config.use_pretrained,
+            "using_pretrained": self._use_pretrained_for_generation,
+        }
+        if self._use_pretrained_for_generation and self.pretrained_generator:
+            config["pretrained_model"] = self.config.pretrained_model_name
+            config["pretrained_vocab_size"] = self.pretrained_generator.vocab_size
+        return config
     
     async def update_config(self, config: dict):
         for k, v in config.items():
@@ -264,11 +339,25 @@ class GeneratorEngine:
         return self.tokenizer.encode(smiles)
     
     def generate_one(self) -> str:
-        self.policy.eval()
-        with torch.no_grad():
-            sequences, _ = self.policy.generate(batch_size=1, bos_token_id=self.tokenizer.bos_token_id,
-                                                eos_token_id=self.tokenizer.eos_token_id, device=self.config.device)
-        return self.tokenizer.decode(sequences[0].tolist())
+        if self._use_pretrained_for_generation and self.pretrained_generator is not None:
+            smiles_list = self.pretrained_generator.generate(
+                batch_size=1,
+                temperature=self.config.temperature,
+                top_k=self.config.top_k,
+                top_p=self.config.top_p,
+                max_length=self.config.max_len
+            )
+            return smiles_list[0] if smiles_list else ""
+        else:
+            self.policy.eval()
+            with torch.no_grad():
+                sequences, _ = self.policy.generate(
+                    batch_size=1,
+                    bos_token_id=self.tokenizer.bos_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    device=self.config.device
+                )
+            return self.tokenizer.decode(sequences[0].tolist())
     
     def score_molecule(self, smiles: str) -> dict:
         import asyncio
