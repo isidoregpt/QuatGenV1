@@ -1,14 +1,19 @@
 """Molecule management API routes"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
 from database.connection import get_db
 from database import queries
+from visualization.renderer import MoleculeRenderer, RenderConfig, ImageFormat
 
 router = APIRouter()
+
+# Initialize renderer
+molecule_renderer = MoleculeRenderer()
 
 
 class MoleculeBase(BaseModel):
@@ -711,4 +716,261 @@ async def get_filter_patterns():
         "quat_patterns": MolecularFilter.QUAT_PATTERNS,
         "counterion_patterns": MolecularFilter.COUNTERION_PATTERNS,
         "exclusion_patterns": MolecularFilter.QUAT_EXCLUSIONS
+    }
+
+
+# ============================================================================
+# 2D Structure Rendering Endpoints
+# ============================================================================
+
+class RenderRequest(BaseModel):
+    smiles: str
+    width: int = Field(400, ge=100, le=2000)
+    height: int = Field(300, ge=100, le=2000)
+    format: str = Field("png", pattern="^(png|svg)$")
+    highlight_quat: bool = True
+    highlight_smarts: Optional[str] = None
+
+
+class GridRenderRequest(BaseModel):
+    smiles_list: List[str]
+    legends: Optional[List[str]] = None
+    width: int = Field(800, ge=200, le=4000)
+    height: int = Field(600, ge=200, le=4000)
+    mols_per_row: int = Field(4, ge=1, le=10)
+    format: str = Field("png", pattern="^(png|svg)$")
+
+
+class ComparisonRenderRequest(BaseModel):
+    smiles1: str
+    smiles2: str
+    label1: str = "Molecule 1"
+    label2: str = "Molecule 2"
+    width: int = Field(800, ge=200, le=2000)
+    height: int = Field(400, ge=100, le=1000)
+
+
+@router.get("/{molecule_id}/image")
+async def get_molecule_image(
+    molecule_id: int,
+    width: int = Query(400, ge=100, le=2000),
+    height: int = Query(300, ge=100, le=2000),
+    format: str = Query("png", pattern="^(png|svg)$"),
+    highlight_quat: bool = Query(True),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get 2D structure image for a molecule.
+
+    Returns PNG or SVG image directly as binary response.
+    """
+    molecule = await queries.get_molecule_by_id(db, molecule_id)
+    if not molecule:
+        raise HTTPException(status_code=404, detail="Molecule not found")
+
+    if not molecule_renderer.is_ready:
+        raise HTTPException(status_code=503, detail="Renderer not available")
+
+    config = RenderConfig(
+        width=width,
+        height=height,
+        format=ImageFormat.SVG if format.lower() == "svg" else ImageFormat.PNG,
+        highlight_quat_nitrogen=highlight_quat
+    )
+
+    img_bytes = molecule_renderer.render_molecule(molecule.smiles, config)
+
+    if img_bytes is None:
+        raise HTTPException(status_code=500, detail="Rendering failed")
+
+    media_type = "image/svg+xml" if format.lower() == "svg" else "image/png"
+    return Response(content=img_bytes, media_type=media_type)
+
+
+@router.get("/{molecule_id}/image/base64")
+async def get_molecule_image_base64(
+    molecule_id: int,
+    width: int = Query(400, ge=100, le=2000),
+    height: int = Query(300, ge=100, le=2000),
+    format: str = Query("png", pattern="^(png|svg)$"),
+    highlight_quat: bool = Query(True),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get 2D structure image as base64 encoded data URI.
+
+    Useful for embedding in HTML or JSON responses.
+    """
+    molecule = await queries.get_molecule_by_id(db, molecule_id)
+    if not molecule:
+        raise HTTPException(status_code=404, detail="Molecule not found")
+
+    if not molecule_renderer.is_ready:
+        raise HTTPException(status_code=503, detail="Renderer not available")
+
+    config = RenderConfig(
+        width=width,
+        height=height,
+        format=ImageFormat.SVG if format.lower() == "svg" else ImageFormat.PNG,
+        highlight_quat_nitrogen=highlight_quat
+    )
+
+    data_uri = molecule_renderer.render_molecule_data_uri(molecule.smiles, config)
+
+    if data_uri is None:
+        raise HTTPException(status_code=500, detail="Rendering failed")
+
+    return {
+        "molecule_id": molecule_id,
+        "smiles": molecule.smiles,
+        "image_data_uri": data_uri,
+        "format": format
+    }
+
+
+@router.post("/render")
+async def render_smiles(render_request: RenderRequest):
+    """
+    Render any SMILES string to image.
+
+    Returns base64 encoded image data URI and molecule information.
+    """
+    if not molecule_renderer.is_ready:
+        raise HTTPException(status_code=503, detail="Renderer not available")
+
+    config = RenderConfig(
+        width=render_request.width,
+        height=render_request.height,
+        format=ImageFormat.SVG if render_request.format.lower() == "svg" else ImageFormat.PNG,
+        highlight_quat_nitrogen=render_request.highlight_quat
+    )
+
+    data_uri = molecule_renderer.render_molecule_data_uri(
+        render_request.smiles,
+        config,
+        render_request.highlight_smarts
+    )
+
+    if data_uri is None:
+        raise HTTPException(status_code=400, detail="Invalid SMILES or rendering failed")
+
+    # Also return molecule info
+    mol_info = molecule_renderer.get_molecule_info(render_request.smiles)
+
+    return {
+        "smiles": render_request.smiles,
+        "image_data_uri": data_uri,
+        "format": render_request.format,
+        "molecule_info": mol_info
+    }
+
+
+@router.post("/render/grid")
+async def render_molecule_grid(grid_request: GridRenderRequest):
+    """
+    Render multiple molecules in a grid layout.
+
+    Useful for visualizing sets of molecules for comparison.
+    """
+    if not molecule_renderer.is_ready:
+        raise HTTPException(status_code=503, detail="Renderer not available")
+
+    if len(grid_request.smiles_list) > 50:
+        raise HTTPException(status_code=400, detail="Maximum 50 molecules per grid")
+
+    if len(grid_request.smiles_list) == 0:
+        raise HTTPException(status_code=400, detail="At least one SMILES required")
+
+    config = RenderConfig(
+        width=grid_request.width,
+        height=grid_request.height,
+        mols_per_row=grid_request.mols_per_row,
+        format=ImageFormat.SVG if grid_request.format.lower() == "svg" else ImageFormat.PNG,
+        highlight_quat_nitrogen=True
+    )
+
+    base64_img = molecule_renderer.render_grid_base64(
+        grid_request.smiles_list,
+        grid_request.legends,
+        config
+    )
+
+    if base64_img is None:
+        raise HTTPException(status_code=500, detail="Grid rendering failed")
+
+    mime_type = "image/svg+xml" if grid_request.format.lower() == "svg" else "image/png"
+
+    return {
+        "num_molecules": len(grid_request.smiles_list),
+        "image_base64": base64_img,
+        "mime_type": mime_type,
+        "format": grid_request.format
+    }
+
+
+@router.post("/render/comparison")
+async def render_molecule_comparison(comparison_request: ComparisonRenderRequest):
+    """
+    Render two molecules side by side for comparison.
+
+    Useful for comparing generated molecules with reference compounds.
+    """
+    if not molecule_renderer.is_ready:
+        raise HTTPException(status_code=503, detail="Renderer not available")
+
+    config = RenderConfig(
+        width=comparison_request.width,
+        height=comparison_request.height,
+        mols_per_row=2,
+        format=ImageFormat.PNG,
+        highlight_quat_nitrogen=True
+    )
+
+    base64_img = molecule_renderer.render_grid_base64(
+        [comparison_request.smiles1, comparison_request.smiles2],
+        [comparison_request.label1, comparison_request.label2],
+        config
+    )
+
+    if base64_img is None:
+        raise HTTPException(status_code=500, detail="Comparison rendering failed")
+
+    # Get info for both molecules
+    info1 = molecule_renderer.get_molecule_info(comparison_request.smiles1)
+    info2 = molecule_renderer.get_molecule_info(comparison_request.smiles2)
+
+    return {
+        "image_base64": base64_img,
+        "mime_type": "image/png",
+        "molecule1": {
+            "smiles": comparison_request.smiles1,
+            "label": comparison_request.label1,
+            "info": info1
+        },
+        "molecule2": {
+            "smiles": comparison_request.smiles2,
+            "label": comparison_request.label2,
+            "info": info2
+        }
+    }
+
+
+@router.get("/render/status")
+async def get_renderer_status():
+    """
+    Get molecule renderer status.
+
+    Returns availability and supported features.
+    """
+    return {
+        "available": molecule_renderer.is_ready,
+        "supported_formats": ["png", "svg"] if molecule_renderer.is_ready else [],
+        "features": {
+            "single_molecule": molecule_renderer.is_ready,
+            "grid_rendering": molecule_renderer.is_ready,
+            "quat_highlighting": molecule_renderer.is_ready,
+            "smarts_highlighting": molecule_renderer.is_ready,
+            "atom_map_coloring": molecule_renderer.is_ready,
+            "comparison_view": molecule_renderer.is_ready
+        }
     }

@@ -12,6 +12,7 @@ from api.routes import molecules, generator, export, status
 from database.connection import init_db, close_db
 from generator.engine import GeneratorEngine
 from data import ChEMBLFetcher, ReferenceDatabase
+from visualization.renderer import MoleculeRenderer
 
 # Configure logging
 logging.basicConfig(
@@ -60,10 +61,15 @@ async def lifespan(app: FastAPI):
     await generator_engine.initialize()
     logger.info("Generator engine initialized")
 
+    # Initialize molecule renderer
+    molecule_renderer = MoleculeRenderer()
+    logger.info(f"Molecule renderer ready: {molecule_renderer.is_ready}")
+
     # Store in app state for access in routes
     app.state.generator = generator_engine
     app.state.chembl_fetcher = chembl_fetcher
     app.state.reference_db = reference_db
+    app.state.molecule_renderer = molecule_renderer
 
     yield
 
@@ -117,7 +123,8 @@ async def health():
         "database": "connected",
         "generator": "ready" if generator_engine and generator_engine.is_ready else "initializing",
         "chembl_fetcher": "ready" if chembl_fetcher and chembl_fetcher.is_ready else "initializing",
-        "reference_db": "ready" if reference_db and reference_db.is_ready else "initializing"
+        "reference_db": "ready" if reference_db and reference_db.is_ready else "initializing",
+        "molecule_renderer": "ready" if hasattr(app.state, 'molecule_renderer') and app.state.molecule_renderer.is_ready else "unavailable"
     }
 
 

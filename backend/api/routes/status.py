@@ -167,3 +167,38 @@ async def get_reference_compound(chembl_id: str, req: Request):
         return {"error": f"Compound {chembl_id} not found"}
 
     return ref.to_dict()
+
+
+@router.get("/renderer")
+async def get_renderer_status(req: Request):
+    """
+    Get molecule renderer status.
+
+    Returns availability and supported features for 2D structure visualization.
+    """
+    from visualization.renderer import MoleculeRenderer
+
+    # Use app state renderer if available, otherwise create temporary one
+    renderer = getattr(req.app.state, "molecule_renderer", None)
+    if not renderer:
+        renderer = MoleculeRenderer()
+
+    return {
+        "available": renderer.is_ready,
+        "supported_formats": ["png", "svg"] if renderer.is_ready else [],
+        "features": {
+            "single_molecule": renderer.is_ready,
+            "grid_rendering": renderer.is_ready,
+            "quat_highlighting": renderer.is_ready,
+            "smarts_highlighting": renderer.is_ready,
+            "atom_map_coloring": renderer.is_ready,
+            "comparison_view": renderer.is_ready,
+            "similarity_highlighting": renderer.is_ready
+        },
+        "default_config": {
+            "width": 400,
+            "height": 300,
+            "format": "png",
+            "highlight_quat_nitrogen": True
+        }
+    }
