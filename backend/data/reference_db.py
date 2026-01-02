@@ -207,6 +207,30 @@ class ReferenceDatabase:
         self.by_smiles = {c.smiles: c for c in REFERENCE_QUATS}
         self.by_chembl = {c.chembl_id: c for c in REFERENCE_QUATS if c.chembl_id}
         self.by_cas = {c.cas_number: c for c in REFERENCE_QUATS if c.cas_number}
+        self._is_ready = False
+
+    async def initialize(self):
+        """Initialize the reference database (no async operations needed)"""
+        self._is_ready = True
+        logger.info(f"Reference database initialized with {len(self.compounds)} compounds")
+
+    @property
+    def is_ready(self) -> bool:
+        """Check if database is ready"""
+        return self._is_ready
+
+    @property
+    def compound_count(self) -> int:
+        """Get total number of compounds"""
+        return len(self.compounds)
+
+    def get(self, chembl_id: str) -> Optional[ReferenceQuat]:
+        """Get a compound by ChEMBL ID"""
+        return self.by_chembl.get(chembl_id)
+
+    def get_smiles_list(self) -> List[str]:
+        """Get list of all SMILES strings"""
+        return [c.smiles for c in self.compounds.values()]
 
     def get_all(self) -> List[ReferenceQuat]:
         """Get all reference compounds"""

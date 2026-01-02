@@ -50,8 +50,13 @@ async def lifespan(app: FastAPI):
     await chembl_fetcher.initialize()
     logger.info(f"ChEMBL fetcher initialized: {chembl_fetcher.compound_count} compounds cached")
 
-    # Initialize generator engine
+    # Initialize generator engine with data sources for MIC predictor
     generator_engine = GeneratorEngine()
+    # Pass data sources to scoring pipeline before initialization
+    from scoring.pipeline import ScoringPipeline
+    generator_engine.scoring = ScoringPipeline()
+    generator_engine.scoring.reference_db = reference_db
+    generator_engine.scoring.chembl_fetcher = chembl_fetcher
     await generator_engine.initialize()
     logger.info("Generator engine initialized")
 

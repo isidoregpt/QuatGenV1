@@ -117,16 +117,38 @@ async def get_reference_compounds(req: Request):
 
     compounds = []
     for ref in reference_db.get_all():
+        # Build mic_ranges from individual organism MIC tuples
+        mic_ranges = {}
+        if ref.mic_s_aureus:
+            mic_ranges["S. aureus"] = {"min": ref.mic_s_aureus[0], "max": ref.mic_s_aureus[1]}
+        if ref.mic_e_coli:
+            mic_ranges["E. coli"] = {"min": ref.mic_e_coli[0], "max": ref.mic_e_coli[1]}
+        if ref.mic_p_aeruginosa:
+            mic_ranges["P. aeruginosa"] = {"min": ref.mic_p_aeruginosa[0], "max": ref.mic_p_aeruginosa[1]}
+        if ref.mic_c_albicans:
+            mic_ranges["C. albicans"] = {"min": ref.mic_c_albicans[0], "max": ref.mic_c_albicans[1]}
+
+        # Calculate molecular weight from SMILES if possible
+        mw = 0.0
+        try:
+            from rdkit import Chem
+            from rdkit.Chem import Descriptors
+            mol = Chem.MolFromSmiles(ref.smiles)
+            if mol:
+                mw = Descriptors.MolWt(mol)
+        except Exception:
+            pass
+
         compounds.append(ReferenceCompound(
             name=ref.name,
-            chembl_id=ref.chembl_id,
+            chembl_id=ref.chembl_id or "",
             smiles=ref.smiles,
-            category=ref.category,
-            molecular_weight=ref.molecular_weight,
+            category="quaternary ammonium disinfectant",
+            molecular_weight=round(mw, 1),
             applications=ref.applications,
-            mic_ranges=ref.mic_ranges,
+            mic_ranges=mic_ranges,
             ld50_oral_rat=ref.ld50_oral_rat,
-            regulatory_status=ref.regulatory_status
+            regulatory_status="approved" if ref.ld50_oral_rat else "experimental"
         ))
 
     return compounds

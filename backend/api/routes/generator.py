@@ -167,9 +167,20 @@ async def get_training_data(req: Request, organism: Optional[str] = None, limit:
     # Add reference compound data
     if reference_db and reference_db.is_ready:
         for ref in reference_db.get_all():
-            for org, mic_range in ref.mic_ranges.items():
+            # Build mic_ranges from individual organism MIC tuples
+            mic_ranges = {}
+            if ref.mic_s_aureus:
+                mic_ranges["S. aureus"] = ref.mic_s_aureus
+            if ref.mic_e_coli:
+                mic_ranges["E. coli"] = ref.mic_e_coli
+            if ref.mic_p_aeruginosa:
+                mic_ranges["P. aeruginosa"] = ref.mic_p_aeruginosa
+            if ref.mic_c_albicans:
+                mic_ranges["C. albicans"] = ref.mic_c_albicans
+
+            for org, mic_tuple in mic_ranges.items():
                 # Use geometric mean of min/max as representative MIC
-                mic_mean = (mic_range["min"] * mic_range["max"]) ** 0.5
+                mic_mean = (mic_tuple[0] * mic_tuple[1]) ** 0.5
 
                 if organism and organism.lower() not in org.lower():
                     continue

@@ -285,3 +285,131 @@ async def list_admet_models(request: Request):
         "loaded_count": len(pipeline.admet_predictor.available_properties),
         "available_properties": pipeline.admet_predictor.available_properties
     }
+
+
+# MIC Prediction Endpoints
+
+class MICPredictRequest(BaseModel):
+    smiles: str
+    organism: Optional[str] = "general"
+
+
+@router.get("/{molecule_id}/mic")
+async def get_molecule_mic(
+    molecule_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get detailed MIC predictions for a molecule against all target organisms."""
+    molecule = await queries.get_molecule_by_id(db, molecule_id)
+    if not molecule:
+        raise HTTPException(status_code=404, detail="Molecule not found")
+
+    # Get the scoring pipeline from app state
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.mic_predictor_ready:
+        raise HTTPException(status_code=503, detail="MIC predictor not available")
+
+    predictions = pipeline.efficacy_scorer.mic_predictor.predict_all_organisms(molecule.smiles)
+
+    return {
+        "molecule_id": molecule_id,
+        "smiles": molecule.smiles,
+        "predictions": {
+            org: {
+                "mic": pred.predicted_mic,
+                "confidence": pred.confidence,
+                "activity_class": pred.activity_class,
+                "percentile": pred.percentile_rank,
+                "similar_compounds": pred.similar_compounds
+            }
+            for org, pred in predictions.items()
+        }
+    }
+
+
+@router.post("/mic/predict")
+async def predict_mic(
+    mic_request: MICPredictRequest,
+    request: Request
+):
+    """Predict MIC for any SMILES string against a specified organism."""
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.mic_predictor_ready:
+        raise HTTPException(status_code=503, detail="MIC predictor not available")
+
+    smiles = mic_request.smiles
+    organism = mic_request.organism or "general"
+
+    prediction = pipeline.efficacy_scorer.mic_predictor.predict(smiles, organism)
+
+    return {
+        "smiles": smiles,
+        "organism": organism,
+        "predicted_mic": prediction.predicted_mic,
+        "confidence": prediction.confidence,
+        "activity_class": prediction.activity_class,
+        "percentile_rank": prediction.percentile_rank,
+        "similar_compounds": prediction.similar_compounds
+    }
+
+
+@router.post("/mic/predict-all")
+async def predict_mic_all_organisms(
+    mic_request: MICPredictRequest,
+    request: Request
+):
+    """Predict MIC for a SMILES string against all target organisms."""
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.mic_predictor_ready:
+        raise HTTPException(status_code=503, detail="MIC predictor not available")
+
+    predictions = pipeline.efficacy_scorer.mic_predictor.predict_all_organisms(mic_request.smiles)
+
+    return {
+        "smiles": mic_request.smiles,
+        "predictions": {
+            org: {
+                "mic": pred.predicted_mic,
+                "confidence": pred.confidence,
+                "activity_class": pred.activity_class,
+                "percentile": pred.percentile_rank,
+                "similar_compounds": pred.similar_compounds
+            }
+            for org, pred in predictions.items()
+        }
+    }
+
+
+@router.get("/mic/status")
+async def get_mic_predictor_status(request: Request):
+    """Get MIC predictor status and available organisms."""
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        return {"available": False, "reason": "Generator not initialized"}
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline:
+        return {"available": False, "reason": "Scoring pipeline not initialized"}
+
+    if not pipeline.mic_predictor_ready:
+        return {"available": False, "reason": "MIC predictor not ready"}
+
+    mic_predictor = pipeline.efficacy_scorer.mic_predictor
+
+    return {
+        "available": True,
+        "is_trained": mic_predictor.is_trained,
+        "organisms": mic_predictor.ORGANISMS,
+        "reference_compounds_count": len(mic_predictor.reference_embeddings),
+        "has_statistics": len(mic_predictor.mic_statistics) > 0,
+        "activity_thresholds": mic_predictor.MIC_THRESHOLDS
+    }

@@ -23,6 +23,8 @@ class ScoringConfig:
     use_admet_models: bool = True
     admet_models: Optional[List[str]] = None  # None = load all available
     admet_lazy_load: bool = True  # Load models on first use
+    # MIC predictor settings
+    use_mic_predictor: bool = True
 
 
 class ScoringPipeline:
@@ -35,6 +37,9 @@ class ScoringPipeline:
         self.molecular_encoder = None
         self.admet_predictor = None
         self._is_ready = False
+        # Data sources for MIC predictor
+        self.reference_db = None
+        self.chembl_fetcher = None
 
     @property
     def is_ready(self) -> bool:
@@ -54,6 +59,12 @@ class ScoringPipeline:
             return self.molecular_encoder.embedding_dim
         return 0
 
+    @property
+    def mic_predictor_ready(self) -> bool:
+        return (self.efficacy_scorer is not None and
+                self.efficacy_scorer.mic_predictor is not None and
+                self.efficacy_scorer.mic_predictor.is_ready)
+
     async def initialize(self):
         logger.info("Initializing scoring pipeline...")
         from scoring.efficacy import EfficacyScorer
@@ -61,39 +72,7 @@ class ScoringPipeline:
         from scoring.environmental import EnvironmentalScorer
         from scoring.sa_score import SAScorer
 
-        # Initialize ADMET predictor first (shared resource for safety/environmental)
-        if self.config.use_admet_models:
-            try:
-                from scoring.admet_models import ADMETPredictor
-                logger.info("Initializing ADMET predictor...")
-                self.admet_predictor = ADMETPredictor(
-                    models_to_load=self.config.admet_models,
-                    lazy_load=self.config.admet_lazy_load
-                )
-                success = await self.admet_predictor.initialize()
-                if success:
-                    logger.info(f"ADMET predictor ready with {len(self.admet_predictor.available_properties)} models")
-                else:
-                    logger.warning("ADMET predictor failed to initialize, using RDKit fallback")
-                    self.admet_predictor = None
-            except Exception as e:
-                logger.warning(f"Failed to initialize ADMET predictor: {e}")
-                self.admet_predictor = None
-
-        # Initialize scorers with ADMET predictor
-        self.efficacy_scorer = EfficacyScorer()
-        await self.efficacy_scorer.initialize()
-
-        self.safety_scorer = SafetyScorer()
-        await self.safety_scorer.initialize(admet_predictor=self.admet_predictor)
-
-        self.environmental_scorer = EnvironmentalScorer()
-        await self.environmental_scorer.initialize(admet_predictor=self.admet_predictor)
-
-        self.sa_scorer = SAScorer()
-        await self.sa_scorer.initialize()
-
-        # Initialize molecular encoder if configured
+        # Initialize molecular encoder FIRST (needed for MIC predictor in efficacy scorer)
         if self.config.use_molecular_encoder:
             try:
                 from scoring.molecular_encoder import MolecularEncoder
@@ -112,6 +91,43 @@ class ScoringPipeline:
             except Exception as e:
                 logger.warning(f"Failed to initialize molecular encoder: {e}")
                 self.molecular_encoder = None
+
+        # Initialize ADMET predictor (shared resource for safety/environmental)
+        if self.config.use_admet_models:
+            try:
+                from scoring.admet_models import ADMETPredictor
+                logger.info("Initializing ADMET predictor...")
+                self.admet_predictor = ADMETPredictor(
+                    models_to_load=self.config.admet_models,
+                    lazy_load=self.config.admet_lazy_load
+                )
+                success = await self.admet_predictor.initialize()
+                if success:
+                    logger.info(f"ADMET predictor ready with {len(self.admet_predictor.available_properties)} models")
+                else:
+                    logger.warning("ADMET predictor failed to initialize, using RDKit fallback")
+                    self.admet_predictor = None
+            except Exception as e:
+                logger.warning(f"Failed to initialize ADMET predictor: {e}")
+                self.admet_predictor = None
+
+        # Initialize efficacy scorer with MIC predictor (uses encoder, reference_db, chembl_fetcher)
+        self.efficacy_scorer = EfficacyScorer()
+        await self.efficacy_scorer.initialize(
+            encoder=self.molecular_encoder,
+            reference_db=self.reference_db,
+            chembl_fetcher=self.chembl_fetcher
+        )
+
+        # Initialize other scorers with ADMET predictor
+        self.safety_scorer = SafetyScorer()
+        await self.safety_scorer.initialize(admet_predictor=self.admet_predictor)
+
+        self.environmental_scorer = EnvironmentalScorer()
+        await self.environmental_scorer.initialize(admet_predictor=self.admet_predictor)
+
+        self.sa_scorer = SAScorer()
+        await self.sa_scorer.initialize()
 
         self._is_ready = True
         logger.info("Scoring pipeline ready")

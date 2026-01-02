@@ -151,7 +151,9 @@ class GeneratorEngine:
         logger.info("Initializing generator engine...")
 
         # Initialize scoring pipeline first (always needed)
-        self.scoring = ScoringPipeline()
+        # Don't overwrite if already set (allows pre-configuration with data sources)
+        if self.scoring is None:
+            self.scoring = ScoringPipeline()
         await self.scoring.initialize()
 
         # Try to load pretrained model if configured
