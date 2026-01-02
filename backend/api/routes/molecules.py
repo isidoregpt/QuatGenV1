@@ -1,8 +1,8 @@
 """Molecule management API routes"""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field
 
 from database.connection import get_db
@@ -103,3 +103,103 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 async def bulk_star(molecule_ids: list[int], starred: bool = True, db: AsyncSession = Depends(get_db)):
     count = await queries.bulk_update_starred(db, molecule_ids, starred)
     return {"updated": count}
+
+
+class EmbeddingResponse(BaseModel):
+    molecule_id: int
+    smiles: str
+    embedding: List[float]
+    embedding_dim: int
+
+
+class SimilarityRequest(BaseModel):
+    smiles1: str
+    smiles2: str
+
+
+class SimilarityResponse(BaseModel):
+    smiles1: str
+    smiles2: str
+    similarity: float
+
+
+@router.get("/{molecule_id}/embedding", response_model=EmbeddingResponse)
+async def get_molecule_embedding(
+    molecule_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get the molecular embedding for a specific molecule."""
+    molecule = await queries.get_molecule_by_id(db, molecule_id)
+    if not molecule:
+        raise HTTPException(status_code=404, detail="Molecule not found")
+
+    # Get the scoring pipeline from app state
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.encoder_ready:
+        raise HTTPException(status_code=503, detail="Molecular encoder not available")
+
+    embedding = await pipeline.get_embedding(molecule.smiles)
+    if embedding is None:
+        raise HTTPException(status_code=500, detail="Failed to compute embedding")
+
+    return EmbeddingResponse(
+        molecule_id=molecule_id,
+        smiles=molecule.smiles,
+        embedding=embedding.tolist(),
+        embedding_dim=len(embedding)
+    )
+
+
+@router.post("/embedding/compute")
+async def compute_embedding(
+    smiles: str,
+    request: Request
+):
+    """Compute embedding for an arbitrary SMILES string."""
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.encoder_ready:
+        raise HTTPException(status_code=503, detail="Molecular encoder not available")
+
+    embedding = await pipeline.get_embedding(smiles)
+    if embedding is None:
+        raise HTTPException(status_code=500, detail="Failed to compute embedding")
+
+    return {
+        "smiles": smiles,
+        "embedding": embedding.tolist(),
+        "embedding_dim": len(embedding)
+    }
+
+
+@router.post("/embedding/similarity", response_model=SimilarityResponse)
+async def compute_similarity(
+    similarity_request: SimilarityRequest,
+    request: Request
+):
+    """Compute similarity between two molecules based on their embeddings."""
+    if not hasattr(request.app.state, 'generator') or request.app.state.generator is None:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    pipeline = request.app.state.generator.scoring
+    if not pipeline or not pipeline.encoder_ready:
+        raise HTTPException(status_code=503, detail="Molecular encoder not available")
+
+    similarity = await pipeline.get_similarity(
+        similarity_request.smiles1,
+        similarity_request.smiles2
+    )
+    if similarity is None:
+        raise HTTPException(status_code=500, detail="Failed to compute similarity")
+
+    return SimilarityResponse(
+        smiles1=similarity_request.smiles1,
+        smiles2=similarity_request.smiles2,
+        similarity=similarity
+    )
