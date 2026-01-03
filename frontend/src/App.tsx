@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Search, Beaker, List } from 'lucide-react';
+import { Search, Beaker, BarChart3 } from 'lucide-react';
 import { GeneratorControls } from './components/GeneratorControls';
 import { ResultsTable } from './components/ResultsTable';
 import { MoleculeDetail } from './components/MoleculeDetail';
 import { StatusBar } from './components/StatusBar';
 import { SearchPanel } from './components/search';
+import { BenchmarkPanel } from './components/benchmark';
 import { useStore } from './hooks/useStore';
 import { useBackend } from './hooks/useBackend';
 
-type SidebarView = 'generator' | 'search';
+type SidebarView = 'generator' | 'search' | 'benchmark';
 
 function App() {
   const { selectedMolecule, setSelectedMolecule } = useStore();
@@ -65,6 +66,17 @@ function App() {
               <Search size={16} />
               Search
             </button>
+            <button
+              onClick={() => setSidebarView('benchmark')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                sidebarView === 'benchmark'
+                  ? 'bg-emerald-600 text-white'
+                  : 'text-gray-300 hover:text-white hover:bg-gray-600'
+              }`}
+            >
+              <BarChart3 size={16} />
+              Benchmark
+            </button>
           </div>
         </div>
       </header>
@@ -72,11 +84,18 @@ function App() {
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar */}
         <div className="w-96 border-r border-gray-700 overflow-y-auto">
-          {sidebarView === 'generator' ? (
-            <GeneratorControls />
-          ) : (
+          {sidebarView === 'generator' && <GeneratorControls />}
+          {sidebarView === 'search' && (
             <div className="p-4">
               <SearchPanel
+                onSelectMolecule={handleSearchSelectMolecule}
+              />
+            </div>
+          )}
+          {sidebarView === 'benchmark' && (
+            <div className="p-4">
+              <BenchmarkPanel
+                selectedMoleculeId={selectedMolecule?.id}
                 onSelectMolecule={handleSearchSelectMolecule}
               />
             </div>

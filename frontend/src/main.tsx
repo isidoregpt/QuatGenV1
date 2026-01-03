@@ -4,6 +4,7 @@ import App from './App';
 import './index.css';
 import './styles/molecules.css';
 import './styles/search.css';
+import './styles/benchmark.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

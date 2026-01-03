@@ -326,4 +326,186 @@ export const searchApi = {
   }
 };
 
+// Benchmark API types and methods
+
+export interface PropertyComparison {
+  property: string;
+  generated: number;
+  reference: number;
+  outcome: 'better' | 'similar' | 'worse' | 'unknown';
+  interpretation: string;
+}
+
+export interface BenchmarkResult {
+  smiles: string;
+  molecule_id?: number;
+  overall_score: number;
+  recommendation: string;
+  confidence: number;
+  scaffold_type: string;
+  structural_novelty: number;
+  closest_references: Array<{
+    name: string;
+    similarity: number;
+    smiles?: string;
+    mic_s_aureus?: number;
+    mic_e_coli?: number;
+    ld50?: number;
+    applications?: string[];
+  }>;
+  property_comparisons: PropertyComparison[];
+  advantages: string[];
+  disadvantages: string[];
+  properties_better: number;
+  properties_similar: number;
+  properties_worse: number;
+}
+
+export interface BenchmarkReportSummary {
+  generated_at: string;
+  summary: {
+    total_molecules: number;
+    molecules_benchmarked: number;
+    avg_overall_score: number;
+    top_candidates_count: number;
+  };
+  scaffold_distribution: Record<string, number>;
+  top_candidates: Array<{
+    smiles: string;
+    molecule_id?: number;
+    overall_score: number;
+    recommendation: string;
+    scaffold_type: string;
+    structural_novelty: number;
+    advantages: string[];
+    closest_reference?: string;
+  }>;
+  reference_comparison: {
+    total_comparisons: number;
+    better_than_reference: number;
+    similar_to_reference: number;
+    worse_than_reference: number;
+    closest_references_used: Record<string, number>;
+    property_improvements: Record<string, number>;
+    property_deficits: Record<string, number>;
+  };
+  recommendations: string[];
+}
+
+export interface ReferenceCompound {
+  name: string;
+  smiles: string;
+  chembl_id?: string;
+  mic_s_aureus?: number;
+  mic_e_coli?: number;
+  mic_p_aeruginosa?: number;
+  mic_c_albicans?: number;
+  ld50_oral_rat?: number;
+  applications?: string[];
+}
+
+export const benchmarkApi = {
+  /**
+   * Get benchmark service status
+   */
+  getStatus: async (): Promise<{
+    available: boolean;
+    reference_compounds: number;
+    features: string[];
+  }> => {
+    const response = await fetch(`${API_BASE}/benchmark/status`);
+    if (!response.ok) throw new Error('Failed to fetch benchmark status');
+    return response.json();
+  },
+
+  /**
+   * Benchmark a single molecule by SMILES
+   */
+  benchmarkMolecule: async (
+    smiles: string,
+    predictedScores?: Record<string, number>
+  ): Promise<BenchmarkResult> => {
+    const response = await fetch(`${API_BASE}/benchmark/molecule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ smiles, predicted_scores: predictedScores })
+    });
+    if (!response.ok) throw new Error('Benchmark failed');
+    return response.json();
+  },
+
+  /**
+   * Benchmark molecule by database ID
+   */
+  benchmarkMoleculeById: async (moleculeId: number): Promise<BenchmarkResult> => {
+    const response = await fetch(`${API_BASE}/benchmark/molecule/${moleculeId}`);
+    if (!response.ok) throw new Error('Benchmark failed');
+    return response.json();
+  },
+
+  /**
+   * Batch benchmark molecules
+   */
+  benchmarkBatch: async (
+    moleculeIds?: number[],
+    topN: number = 20,
+    minScore: number = 0
+  ): Promise<{
+    count: number;
+    molecules_analyzed: number;
+    results: BenchmarkResult[];
+  }> => {
+    const response = await fetch(`${API_BASE}/benchmark/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        molecule_ids: moleculeIds,
+        top_n: topN,
+        min_score: minScore
+      })
+    });
+    if (!response.ok) throw new Error('Batch benchmark failed');
+    return response.json();
+  },
+
+  /**
+   * Generate comprehensive benchmark report
+   */
+  generateReport: async (moleculeIds?: number[]): Promise<BenchmarkReportSummary> => {
+    const response = await fetch(`${API_BASE}/benchmark/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ molecule_ids: moleculeIds })
+    });
+    if (!response.ok) throw new Error('Report generation failed');
+    return response.json();
+  },
+
+  /**
+   * Get reference compounds
+   */
+  getReferences: async (): Promise<{
+    count: number;
+    compounds: ReferenceCompound[];
+  }> => {
+    const response = await fetch(`${API_BASE}/benchmark/references`);
+    if (!response.ok) throw new Error('Failed to fetch references');
+    return response.json();
+  },
+
+  /**
+   * Get benchmark criteria and thresholds
+   */
+  getCriteria: async (): Promise<{
+    property_thresholds: Record<string, number>;
+    optimization_directions: Record<string, boolean | null>;
+    score_interpretation: Record<string, string>;
+    scaffold_types: string[];
+  }> => {
+    const response = await fetch(`${API_BASE}/benchmark/criteria`);
+    if (!response.ok) throw new Error('Failed to fetch criteria');
+    return response.json();
+  }
+};
+
 export default moleculeApi;
