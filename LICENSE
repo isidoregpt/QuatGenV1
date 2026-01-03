@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2024 Quat Generator Pro
+Copyright (c) 2024 Jonathan Graziola
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,33 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+CITATION REQUEST
+
+If you use Quat Generator Pro in academic research, publications, or 
+presentations, please cite:
+
+    Graziola, J. (2026). Quat Generator Pro: AI-Powered Molecular Discovery 
+    Platform for Quaternary Ammonium Antimicrobials. 
+    https://github.com/isidoregpt/QuatGenV1
+
+BibTeX:
+
+    @software{graziola2024quatgenerator,
+      author = {Graziola, Jonathan},
+      title = {Quat Generator Pro: AI-Powered Molecular Discovery Platform 
+               for Quaternary Ammonium Antimicrobials},
+      year = {2024},
+      url = {https://github.com/isidoregpt/QuatGenV1}
+    }
+
+--------------------------------------------------------------------------------
+
+DISCLAIMER FOR CHEMICAL RESEARCH
+
+This software generates computational predictions for research purposes only. 
+All outputs require experimental validation. Users are solely responsible for 
+laboratory safety, regulatory compliance, and appropriate handling of any 
+compounds synthesized based on this software's suggestions.
