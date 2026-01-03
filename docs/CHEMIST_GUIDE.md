@@ -17,6 +17,8 @@
 7. [Quick Reference](#7-quick-reference)
 8. [Appendices](#8-appendices)
 
+> *In a hurry? Skip to [Section 4.2: Generating New Molecules](#42-generating-new-molecules) to start immediately, or [Section 7: Quick Reference](#7-quick-reference) for a one-page summary.*
+
 ---
 
 ## 1. Executive Summary
@@ -65,6 +67,8 @@ AI-assisted design addresses these limitations by:
 #### The REINVENT Generative Model
 
 At the heart of Quat Generator Pro is REINVENT, a 171-million parameter deep learning model that has "learned the grammar of chemistry." Think of it as a language model, but instead of predicting the next word in a sentence, it predicts the next atom or bond in a molecular structure.
+
+*Imagine teaching a chemist to draw molecules by showing them millions of examples. Eventually, they learn the "rules"—carbons make four bonds, aromatic rings are stable, certain groups appear together. REINVENT learned these rules from 750 million molecules, so when it draws new structures, they're chemically sensible.*
 
 **Training Foundation**: REINVENT was trained on millions of molecules from public databases (ZINC, ChEMBL) before being fine-tuned specifically for quaternary ammonium generation. Through this training, the model learned:
 
@@ -162,6 +166,8 @@ The SA Score (Synthetic Accessibility Score) estimates how difficult a molecule 
 - Multiple quat centers (-10 points each)
 
 **Estimated Synthesis Steps**: The tool also provides a rough estimate of synthetic steps (2-20), helping prioritize candidates for rapid prototyping.
+
+> *Note: The raw SA Score algorithm outputs 1-10 (lower = easier). Quat Generator Pro converts this to a 0-100 scale (higher = easier to synthesize) for consistency with other scores.*
 
 ### 2.3 Reference Compound Database
 
@@ -360,7 +366,7 @@ A progress indicator will appear in the terminal window. Do not close the applic
 
 ### 3.4 Getting Help
 
-**Technical Support**: Report issues at https://github.com/anthropics/claude-code/issues
+**Technical Support**: Report issues at https://github.com/isidoregpt/QuatGenV1/issues
 
 **Documentation**: Additional guides are available in the `docs/` folder of your installation.
 
@@ -397,6 +403,8 @@ Each molecule card displays four colored scores:
 | **Yellow** | 50-64 | Moderate - may need optimization |
 | **Orange** | 35-49 | Below average - deprioritize |
 | **Red** | 0-34 | Poor - do not pursue |
+
+[DIAGRAM: Screenshot of main interface with labeled components]
 
 ### 4.2 Generating New Molecules
 
@@ -468,6 +476,8 @@ The objective weights determine how the AI prioritizes different properties duri
 | 100 | 5-10 min | 1-2 min |
 | 500 | 25-45 min | 5-10 min |
 | 1000 | 1-2 hours | 15-30 min |
+
+[DIAGRAM: Flowchart showing Generation → Filtering → Benchmarking → Synthesis Queue]
 
 #### Reviewing Results
 
@@ -595,6 +605,8 @@ Results show a ranked table with:
 | **50-64** | Moderate - Has merit but also weaknesses | Consider structural modifications; synthesize if resources allow |
 | **35-49** | Below average - Significant concerns | Deprioritize unless unique scaffold of interest |
 | **0-34** | Poor - Multiple liabilities | Do not pursue; move to different chemical space |
+
+[DIAGRAM: Example molecule card with score annotations]
 
 #### Efficacy Score Deep Dive
 
@@ -916,7 +928,7 @@ Export your 20 selections to CSV. Sort by SA score descending. This is your synt
 | **SMILES** | Simplified Molecular Input Line Entry System; a text representation of molecular structure (e.g., CCO for ethanol) |
 | **SMARTS** | SMILES Arbitrary Target Specification; a pattern language for substructure searching |
 | **Tanimoto Similarity** | A measure of structural similarity between two molecules (0 = no similarity, 1 = identical) |
-| **SA Score** | Synthetic Accessibility Score (1-10); lower values indicate easier synthesis |
+| **SA Score** | Synthetic Accessibility Score; in Quat Generator Pro displayed as 0-100 (higher = easier to synthesize) |
 | **ADMET** | Absorption, Distribution, Metabolism, Excretion, Toxicity; pharmacokinetic and safety properties |
 | **MIC** | Minimum Inhibitory Concentration; lowest concentration that prevents visible microbial growth |
 | **hERG** | Human ether-à-go-go related gene; a cardiac ion channel; inhibition causes arrhythmia risk |
@@ -1100,9 +1112,10 @@ Export your 20 selections to CSV. Sort by SA score descending. This is your synt
 #### Octenidine Dihydrochloride
 
 - **CAS Number**: 70775-75-6
-- **Structure**: Bis-cationic biguanide derivative
-- **SMILES**: `CCCCCCCCCCN=C(N)N=C(N)c1ccc(C(C)(C)C)cc1.CCCCCCCCCCN=C(N)N=C(N)c1ccc(C(C)(C)C)cc1.[Cl-].[Cl-]`
-- **Molecular Weight**: 625.8 Da
+- **PubChem CID**: 402617
+- **Structure**: Bis-cationic bisphenyl biguanide with octamethylene linker
+- **SMILES**: `CC(C)(C)c1ccc(NC(=N)NC(=N)NCCCCCCCCNC(=N)NC(=N)Nc2ccc(C(C)(C)C)cc2)cc1.[Cl-].[Cl-]`
+- **Molecular Weight**: 623.8 Da
 
 **Typical MIC Values (µg/mL)**:
 - *S. aureus*: 0.25-2 (excellent—best in class)
@@ -1241,14 +1254,73 @@ The original algorithm was extended with quaternary nitrogen-specific considerat
 
 ---
 
+### Appendix D: One-Page Quick Reference (Printable)
+
+---
+
+#### SCORE INTERPRETATION (0-100, higher = better)
+
+| Score | Meaning | Action |
+|-------|---------|--------|
+| 80-100 | Excellent | Synthesize first |
+| 65-79 | Good | Add to queue |
+| 50-64 | Moderate | Consider modifications |
+| 35-49 | Below average | Deprioritize |
+| 0-34 | Poor | Do not pursue |
+
+---
+
+#### WEIGHT PRESETS
+
+**Discovery Phase (default):** Efficacy 40%, Safety 30%, Environmental 15%, Synthesis 15%
+
+**Safety-Focused:** Efficacy 35%, Safety 45%, Environmental 10%, Synthesis 10%
+
+**Rapid Prototyping:** Efficacy 30%, Safety 25%, Environmental 15%, Synthesis 30%
+
+**Green Chemistry:** Efficacy 30%, Safety 25%, Environmental 30%, Synthesis 15%
+
+---
+
+#### MIC INTERPRETATION
+
+| MIC (µg/mL) | Activity | Reference |
+|-------------|----------|-----------|
+| ≤1 | Excellent | Octenidine-class |
+| 1-4 | Very Good | Best commercial quats |
+| 4-8 | Good | Standard disinfection |
+| 8-32 | Moderate | Limited utility |
+| >32 | Weak/Inactive | Not recommended |
+
+---
+
+#### FIRST RUN CHECKLIST
+
+- [ ] Generate 100-200 molecules with default weights
+- [ ] Filter: Safety >70, Efficacy >65
+- [ ] Run batch benchmark against references
+- [ ] Select 5-10 diverse scaffolds
+- [ ] Prioritize by SA Score for synthesis order
+- [ ] Test experimentally → recalibrate trust in predictions
+
+---
+
+#### KEY STRUCTURAL FEATURES
+
+**Positive:** C12-C16 chain, benzyl group, pyridinium, LogP 3-5, MW 300-450
+
+**Negative:** Chain >C18, multiple quats, LogP >6, nitro groups, halogenated aromatics
+
+---
+
 ## Document Information
 
-**Version**: 1.0
-**Last Updated**: January 2026
-**Intended Audience**: Research chemists specializing in quaternary ammonium antimicrobials
+**Version**: 1.0  
+**Last Updated**: January 2026  
+**Intended Audience**: Research chemists specializing in quaternary ammonium antimicrobials  
 **Document Type**: User instruction manual
 
-**Feedback**: If you find errors or have suggestions for improving this manual, please report them at https://github.com/anthropics/claude-code/issues
+**Feedback**: If you find errors or have suggestions for improving this manual, please report them at https://github.com/isidoregpt/QuatGenV1/issues
 
 ---
 
