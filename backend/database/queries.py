@@ -184,3 +184,18 @@ async def update_pareto_frontier(db: AsyncSession) -> int:
     if pareto_ids:
         await db.execute(update(Molecule).where(Molecule.id.in_(pareto_ids)).values(is_pareto=True))
     return len(pareto_ids)
+
+
+async def get_all_molecules(db: AsyncSession, limit: int = 10000) -> list[Molecule]:
+    """
+    Get all molecules from database for search operations.
+
+    Args:
+        db: Database session
+        limit: Maximum number of molecules to return
+
+    Returns:
+        List of Molecule objects
+    """
+    result = await db.execute(select(Molecule).limit(limit))
+    return result.scalars().all()

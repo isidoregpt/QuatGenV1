@@ -113,3 +113,596 @@ async def get_pareto_frontier(req: Request, db: AsyncSession = Depends(get_db)):
     generator = req.app.state.generator
     pareto_molecules = await generator.get_pareto_frontier()
     return {"count": len(pareto_molecules), "molecules": pareto_molecules}
+
+
+@router.post("/fetch-chembl")
+async def fetch_chembl_data(background_tasks: BackgroundTasks, req: Request, force_refresh: bool = False):
+    """
+    Fetch quaternary ammonium compound data from ChEMBL database.
+
+    This fetches real experimental MIC data for known quaternary ammonium
+    disinfectants and searches for additional compounds with antimicrobial activity.
+    """
+    chembl_fetcher = getattr(req.app.state, "chembl_fetcher", None)
+
+    if not chembl_fetcher:
+        raise HTTPException(status_code=503, detail="ChEMBL fetcher not initialized")
+
+    # Run fetch in background
+    background_tasks.add_task(chembl_fetcher.fetch_all, force_refresh=force_refresh)
+
+    return {
+        "status": "fetching",
+        "message": "ChEMBL data fetch started in background",
+        "force_refresh": force_refresh
+    }
+
+
+@router.get("/training-data")
+async def get_training_data(req: Request, organism: Optional[str] = None, limit: int = 1000):
+    """
+    Get training data for molecular generation models.
+
+    Returns SMILES strings with experimental MIC values from ChEMBL,
+    suitable for fine-tuning molecular generation models.
+    """
+    chembl_fetcher = getattr(req.app.state, "chembl_fetcher", None)
+    reference_db = getattr(req.app.state, "reference_db", None)
+
+    training_data = []
+
+    # Get ChEMBL experimental data
+    if chembl_fetcher and chembl_fetcher.is_ready:
+        chembl_data = chembl_fetcher.get_training_data()
+
+        # Filter by organism if specified
+        if organism:
+            chembl_data = [
+                d for d in chembl_data
+                if organism.lower() in d.get("organism", "").lower()
+            ]
+
+        training_data.extend(chembl_data)
+
+    # Add reference compound data
+    if reference_db and reference_db.is_ready:
+        for ref in reference_db.get_all():
+            # Build mic_ranges from individual organism MIC tuples
+            mic_ranges = {}
+            if ref.mic_s_aureus:
+                mic_ranges["S. aureus"] = ref.mic_s_aureus
+            if ref.mic_e_coli:
+                mic_ranges["E. coli"] = ref.mic_e_coli
+            if ref.mic_p_aeruginosa:
+                mic_ranges["P. aeruginosa"] = ref.mic_p_aeruginosa
+            if ref.mic_c_albicans:
+                mic_ranges["C. albicans"] = ref.mic_c_albicans
+
+            for org, mic_tuple in mic_ranges.items():
+                # Use geometric mean of min/max as representative MIC
+                mic_mean = (mic_tuple[0] * mic_tuple[1]) ** 0.5
+
+                if organism and organism.lower() not in org.lower():
+                    continue
+
+                training_data.append({
+                    "smiles": ref.smiles,
+                    "organism": org,
+                    "mic_value": mic_mean,
+                    "chembl_id": ref.chembl_id,
+                    "name": ref.name,
+                    "source": "reference"
+                })
+
+    # Apply limit
+    if len(training_data) > limit:
+        training_data = training_data[:limit]
+
+    return {
+        "count": len(training_data),
+        "data": training_data
+    }
+
+
+@router.get("/smiles-corpus")
+async def get_smiles_corpus(req: Request, include_reference: bool = True):
+    """
+    Get list of SMILES strings for training molecular generation models.
+
+    Returns unique SMILES from both ChEMBL and reference databases.
+    """
+    chembl_fetcher = getattr(req.app.state, "chembl_fetcher", None)
+    reference_db = getattr(req.app.state, "reference_db", None)
+
+    smiles_set = set()
+
+    # Get ChEMBL SMILES
+    if chembl_fetcher and chembl_fetcher.is_ready:
+        smiles_set.update(chembl_fetcher.get_smiles_list())
+
+    # Get reference SMILES
+    if include_reference and reference_db and reference_db.is_ready:
+        smiles_set.update(reference_db.get_smiles_list())
+
+    smiles_list = list(smiles_set)
+
+    return {
+        "count": len(smiles_list),
+        "smiles": smiles_list
+    }
+
+
+# ============================================================================
+# REINVENT RL Fine-Tuning Endpoints
+# ============================================================================
+
+class RLTrainingRequest(BaseModel):
+    """Request model for RL training"""
+    constraints: GenerationConstraints = GenerationConstraints()
+    weights: GenerationWeights = GenerationWeights()
+    max_steps: int = Field(100, ge=1, le=10000)
+
+
+class RLGenerationRequest(BaseModel):
+    """Request model for RL-guided generation"""
+    num_molecules: int = Field(100, ge=1, le=10000)
+    constraints: GenerationConstraints = GenerationConstraints()
+    weights: GenerationWeights = GenerationWeights()
+    rl_steps: int = Field(100, ge=1, le=1000)
+    batch_size: int = Field(64, ge=1, le=512)
+
+
+class RLConfigUpdate(BaseModel):
+    """Model for updating RL configuration"""
+    sigma: Optional[float] = Field(None, ge=1, le=200)
+    learning_rate: Optional[float] = Field(None, ge=1e-6, le=1e-2)
+    diversity_filter: Optional[bool] = None
+    similarity_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
+    kl_weight: Optional[float] = Field(None, ge=0.0, le=1.0)
+
+
+@router.get("/rl/status")
+async def get_rl_status(req: Request):
+    """
+    Get REINVENT RL training status and metrics.
+
+    Returns current training state, configuration, and performance metrics.
+    """
+    generator = req.app.state.generator
+    return generator.rl_training_status
+
+
+@router.post("/rl/start")
+async def start_rl_training(
+    request: RLTrainingRequest,
+    background_tasks: BackgroundTasks,
+    req: Request
+):
+    """
+    Start REINVENT RL fine-tuning loop.
+
+    This trains the agent model to optimize for the specified scoring weights
+    while maintaining similarity to the prior model.
+    """
+    generator = req.app.state.generator
+
+    if not generator.reinvent_trainer:
+        raise HTTPException(
+            status_code=503,
+            detail="REINVENT trainer not initialized. Ensure pretrained model is loaded."
+        )
+
+    if generator.rl_training_active:
+        raise HTTPException(status_code=409, detail="RL training already in progress")
+
+    if generator.is_running:
+        raise HTTPException(status_code=409, detail="Generation already in progress")
+
+    # Validate weights
+    total_weight = (
+        request.weights.efficacy + request.weights.safety +
+        request.weights.environmental + request.weights.sa_score
+    )
+    if abs(total_weight - 1.0) > 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Weights must sum to 1.0 (got {total_weight})"
+        )
+
+    # Create scoring function
+    scoring_function = generator.create_rl_scoring_function(
+        request.constraints.model_dump(),
+        request.weights.model_dump()
+    )
+
+    # Run RL training in background
+    background_tasks.add_task(
+        generator.start_rl_training,
+        scoring_function=scoring_function,
+        max_steps=request.max_steps
+    )
+
+    return {
+        "status": "started",
+        "max_steps": request.max_steps,
+        "config": {
+            "sigma": generator.config.rl_sigma,
+            "learning_rate": generator.config.learning_rate,
+            "diversity_filter": generator.config.rl_diversity_filter,
+        }
+    }
+
+
+@router.post("/rl/stop")
+async def stop_rl_training(req: Request):
+    """Stop ongoing RL training"""
+    generator = req.app.state.generator
+
+    if not generator.rl_training_active:
+        raise HTTPException(status_code=400, detail="No RL training in progress")
+
+    await generator.stop_rl_training()
+
+    return {
+        "status": "stopped",
+        "final_metrics": generator.rl_training_status.get("metrics")
+    }
+
+
+@router.post("/rl/generate")
+async def start_rl_generation(
+    request: RLGenerationRequest,
+    background_tasks: BackgroundTasks,
+    req: Request
+):
+    """
+    Start RL-guided molecule generation.
+
+    This combines RL fine-tuning with molecule generation, training the model
+    while simultaneously generating and storing valid molecules.
+    """
+    generator = req.app.state.generator
+
+    if generator.is_running:
+        raise HTTPException(status_code=409, detail="Generation already in progress")
+
+    if generator.rl_training_active:
+        raise HTTPException(status_code=409, detail="RL training already in progress")
+
+    # Validate weights
+    total_weight = (
+        request.weights.efficacy + request.weights.safety +
+        request.weights.environmental + request.weights.sa_score
+    )
+    if abs(total_weight - 1.0) > 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Weights must sum to 1.0 (got {total_weight})"
+        )
+
+    # Run RL generation in background
+    background_tasks.add_task(
+        generator.run_rl_generation,
+        num_molecules=request.num_molecules,
+        constraints=request.constraints.model_dump(),
+        weights=request.weights.model_dump(),
+        rl_steps=request.rl_steps,
+        batch_size=request.batch_size
+    )
+
+    return {
+        "status": "started",
+        "target_molecules": request.num_molecules,
+        "rl_steps": request.rl_steps,
+        "rl_available": generator.reinvent_trainer is not None
+    }
+
+
+@router.patch("/rl/config")
+async def update_rl_config(config: RLConfigUpdate, req: Request):
+    """
+    Update RL training configuration.
+
+    Changes take effect on the next training run.
+    """
+    generator = req.app.state.generator
+
+    if generator.rl_training_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot update config while RL training is active"
+        )
+
+    updates = {}
+
+    if config.sigma is not None:
+        generator.config.rl_sigma = config.sigma
+        updates["sigma"] = config.sigma
+
+    if config.learning_rate is not None:
+        generator.config.learning_rate = config.learning_rate
+        updates["learning_rate"] = config.learning_rate
+
+    if config.diversity_filter is not None:
+        generator.config.rl_diversity_filter = config.diversity_filter
+        updates["diversity_filter"] = config.diversity_filter
+
+    if config.similarity_threshold is not None:
+        generator.config.rl_similarity_threshold = config.similarity_threshold
+        updates["similarity_threshold"] = config.similarity_threshold
+
+    if config.kl_weight is not None:
+        generator.config.rl_kl_weight = config.kl_weight
+        updates["kl_weight"] = config.kl_weight
+
+    # Re-initialize trainer with new config if it exists
+    if updates and generator.reinvent_trainer:
+        await generator._setup_reinvent_trainer()
+
+    return {
+        "status": "updated",
+        "changes": updates,
+        "current_config": {
+            "sigma": generator.config.rl_sigma,
+            "learning_rate": generator.config.learning_rate,
+            "diversity_filter": generator.config.rl_diversity_filter,
+            "similarity_threshold": generator.config.rl_similarity_threshold,
+            "kl_weight": generator.config.rl_kl_weight,
+        }
+    }
+
+
+@router.get("/rl/replay-buffer")
+async def get_replay_buffer(req: Request, limit: int = 100):
+    """
+    Get top molecules from the experience replay buffer.
+
+    Returns the highest-scoring molecules seen during RL training.
+    """
+    generator = req.app.state.generator
+
+    if not generator.reinvent_trainer:
+        raise HTTPException(
+            status_code=503,
+            detail="REINVENT trainer not initialized"
+        )
+
+    # Get top entries from replay buffer
+    entries = generator.reinvent_trainer.replay_buffer.sample(
+        min(limit, len(generator.reinvent_trainer.replay_buffer))
+    )
+
+    return {
+        "count": len(entries),
+        "buffer_size": len(generator.reinvent_trainer.replay_buffer),
+        "molecules": [
+            {
+                "smiles": e.smiles,
+                "score": e.score,
+                "prior_nll": e.prior_nll,
+                "agent_nll": e.agent_nll,
+            }
+            for e in entries
+        ]
+    }
+
+
+@router.post("/rl/reset")
+async def reset_rl_trainer(req: Request):
+    """
+    Reset the REINVENT trainer.
+
+    This clears the replay buffer and diversity filter, and reinitializes
+    the agent model from the prior.
+    """
+    generator = req.app.state.generator
+
+    if generator.rl_training_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot reset while RL training is active"
+        )
+
+    if not generator.pretrained_generator or not generator.pretrained_generator.is_ready:
+        raise HTTPException(
+            status_code=503,
+            detail="Pretrained model not available for reset"
+        )
+
+    # Re-setup the trainer (creates new agent from prior)
+    await generator._setup_reinvent_trainer()
+
+    return {
+        "status": "reset",
+        "message": "REINVENT trainer reset successfully"
+    }
+
+
+# ============================================================================
+# Molecular Filter Configuration Endpoints
+# ============================================================================
+
+class FilterConfigUpdate(BaseModel):
+    """Model for updating filter configuration"""
+    require_quaternary_nitrogen: Optional[bool] = None
+    min_mw: Optional[float] = Field(None, ge=50, le=2000)
+    max_mw: Optional[float] = Field(None, ge=50, le=2000)
+    min_logp: Optional[float] = Field(None, ge=-10, le=20)
+    max_logp: Optional[float] = Field(None, ge=-10, le=20)
+    max_hbd: Optional[int] = Field(None, ge=0, le=20)
+    max_hba: Optional[int] = Field(None, ge=0, le=30)
+    max_rotatable_bonds: Optional[int] = Field(None, ge=0, le=50)
+    max_tpsa: Optional[float] = Field(None, ge=0, le=500)
+    min_chain_length: Optional[int] = Field(None, ge=0, le=30)
+    max_chain_length: Optional[int] = Field(None, ge=0, le=30)
+    apply_pains_filter: Optional[bool] = None
+    apply_brenk_filter: Optional[bool] = None
+    apply_veber: Optional[bool] = None
+    diversity_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
+
+
+@router.get("/filters/config")
+async def get_filter_config(req: Request):
+    """
+    Get current molecular filter configuration.
+
+    Returns all filter settings including property ranges and enabled filters.
+    """
+    generator = req.app.state.generator
+
+    if not generator or not generator.molecular_filter:
+        return {"available": False, "reason": "Molecular filter not initialized"}
+
+    config = generator.molecular_filter.config
+
+    return {
+        "available": True,
+        "config": {
+            "validity": {
+                "require_valid_smiles": config.require_valid_smiles,
+                "require_sanitization": config.require_sanitization,
+            },
+            "quat_specific": {
+                "require_quaternary_nitrogen": config.require_quaternary_nitrogen,
+                "min_quat_nitrogens": config.min_quat_nitrogens,
+                "max_quat_nitrogens": config.max_quat_nitrogens,
+                "allowed_counterions": config.allowed_counterions,
+            },
+            "property_ranges": {
+                "min_mw": config.min_mw,
+                "max_mw": config.max_mw,
+                "min_logp": config.min_logp,
+                "max_logp": config.max_logp,
+                "max_hbd": config.max_hbd,
+                "max_hba": config.max_hba,
+                "max_rotatable_bonds": config.max_rotatable_bonds,
+                "max_tpsa": config.max_tpsa,
+            },
+            "chain_length": {
+                "min_chain_length": config.min_chain_length,
+                "max_chain_length": config.max_chain_length,
+            },
+            "structural": {
+                "max_rings": config.max_rings,
+                "max_ring_size": config.max_ring_size,
+                "max_stereocenters": config.max_stereocenters,
+            },
+            "alerts": {
+                "apply_pains_filter": config.apply_pains_filter,
+                "apply_brenk_filter": config.apply_brenk_filter,
+                "apply_nih_filter": config.apply_nih_filter,
+            },
+            "drug_likeness": {
+                "apply_lipinski": config.apply_lipinski,
+                "apply_veber": config.apply_veber,
+            },
+            "diversity": {
+                "diversity_threshold": config.diversity_threshold,
+            }
+        }
+    }
+
+
+@router.patch("/filters/config")
+async def update_filter_config(config_update: FilterConfigUpdate, req: Request):
+    """
+    Update molecular filter configuration.
+
+    Changes take effect immediately for subsequent filtering operations.
+    """
+    generator = req.app.state.generator
+
+    if not generator or not generator.molecular_filter:
+        raise HTTPException(status_code=503, detail="Molecular filter not available")
+
+    config = generator.molecular_filter.config
+    updates = {}
+
+    # Apply updates
+    update_dict = config_update.model_dump(exclude_none=True)
+    for key, value in update_dict.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+            updates[key] = value
+
+    # Also update diversity selector threshold if provided
+    if config_update.diversity_threshold is not None and generator.diversity_selector:
+        generator.diversity_selector.similarity_threshold = config_update.diversity_threshold
+
+    # Re-setup filter catalogs if PAINS/Brenk settings changed
+    if "apply_pains_filter" in updates or "apply_brenk_filter" in updates:
+        generator.molecular_filter._setup_filter_catalogs()
+
+    return {
+        "status": "updated",
+        "changes": updates,
+        "message": f"Updated {len(updates)} configuration options"
+    }
+
+
+@router.get("/filters/status")
+async def get_filter_status(req: Request):
+    """
+    Get status of molecular filtering components.
+
+    Returns availability and configuration summary.
+    """
+    generator = req.app.state.generator
+
+    if not generator:
+        return {"available": False, "reason": "Generator not initialized"}
+
+    filter_available = generator.molecular_filter is not None
+    diversity_available = generator.diversity_selector is not None
+
+    status = {
+        "filter_available": filter_available,
+        "diversity_available": diversity_available,
+    }
+
+    if filter_available:
+        config = generator.molecular_filter.config
+        status["filter_config_summary"] = {
+            "require_quat": config.require_quaternary_nitrogen,
+            "mw_range": f"{config.min_mw}-{config.max_mw}",
+            "pains_enabled": config.apply_pains_filter,
+            "brenk_enabled": config.apply_brenk_filter,
+        }
+        status["pains_catalog_loaded"] = generator.molecular_filter._pains_catalog is not None
+        status["brenk_catalog_loaded"] = generator.molecular_filter._brenk_catalog is not None
+
+    if diversity_available:
+        status["diversity_config"] = {
+            "similarity_threshold": generator.diversity_selector.similarity_threshold,
+            "fingerprint_cache_size": len(generator.diversity_selector),
+        }
+
+    return status
+
+
+@router.post("/filters/reset")
+async def reset_filters(req: Request):
+    """
+    Reset molecular filters to default configuration.
+
+    This re-initializes filters with default settings.
+    """
+    generator = req.app.state.generator
+
+    if not generator:
+        raise HTTPException(status_code=503, detail="Generator not initialized")
+
+    from generator.filters import MolecularFilter, FilterConfig, DiversitySelector
+
+    # Reset filter with default config
+    generator.molecular_filter = MolecularFilter(FilterConfig())
+
+    # Reset diversity selector and clear cache
+    if generator.diversity_selector:
+        generator.diversity_selector.clear_cache()
+    generator.diversity_selector = DiversitySelector(similarity_threshold=0.7)
+
+    return {
+        "status": "reset",
+        "message": "Molecular filters reset to defaults"
+    }

@@ -1,0 +1,207 @@
+/* Benchmark component styles */
+
+.benchmark-panel {
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+/* Benchmark result view */
+.benchmark-result-view {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Property comparison table */
+.benchmark-result-view table {
+  border-collapse: collapse;
+}
+
+.benchmark-result-view table tr:hover {
+  background-color: rgba(107, 114, 128, 0.3);
+}
+
+/* Score display */
+.benchmark-result-view .text-4xl {
+  text-shadow: 0 0 20px currentColor;
+}
+
+/* Reference compound card */
+.reference-compound-card {
+  transition: all 0.2s ease-in-out;
+}
+
+.reference-compound-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Benchmark report */
+.benchmark-report {
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Progress bars in report */
+.benchmark-report .h-2 {
+  transition: width 0.5s ease-out;
+}
+
+/* Top candidates list */
+.benchmark-report .max-h-64 {
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 #1f2937;
+}
+
+.benchmark-report .max-h-64::-webkit-scrollbar {
+  width: 6px;
+}
+
+.benchmark-report .max-h-64::-webkit-scrollbar-track {
+  background: #1f2937;
+  border-radius: 3px;
+}
+
+.benchmark-report .max-h-64::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 3px;
+}
+
+.benchmark-report .max-h-64::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* Batch results scrollbar */
+.batch-benchmark .max-h-96 {
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 #1f2937;
+}
+
+.batch-benchmark .max-h-96::-webkit-scrollbar {
+  width: 6px;
+}
+
+.batch-benchmark .max-h-96::-webkit-scrollbar-track {
+  background: #1f2937;
+  border-radius: 3px;
+}
+
+.batch-benchmark .max-h-96::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 3px;
+}
+
+/* Reference compounds grid */
+.reference-compounds .max-h-96 {
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 #1f2937;
+}
+
+.reference-compounds .max-h-96::-webkit-scrollbar {
+  width: 6px;
+}
+
+.reference-compounds .max-h-96::-webkit-scrollbar-track {
+  background: #1f2937;
+  border-radius: 3px;
+}
+
+.reference-compounds .max-h-96::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 3px;
+}
+
+/* Tab button active state */
+.benchmark-panel button[class*="bg-purple-600"] {
+  box-shadow: 0 0 10px rgba(147, 51, 234, 0.3);
+}
+
+/* Loading state */
+.benchmark-panel .loading-spinner {
+  border-width: 2px;
+}
+
+/* Compact result card hover */
+.benchmark-result-compact:hover {
+  background-color: #4b5563;
+}
+
+/* Score badge pulse for high scores */
+@keyframes scorePulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+  }
+}
+
+.benchmark-result-view span[class*="bg-emerald"] {
+  animation: scorePulse 2s infinite;
+}
+
+/* Property outcome icons */
+.benchmark-result-view svg {
+  flex-shrink: 0;
+}
+
+/* Advantages/disadvantages lists */
+.benchmark-result-view ul li {
+  line-height: 1.5;
+}
+
+/* SMILES code display */
+.reference-compound-card code {
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+/* Recommendation callout */
+.benchmark-result-view .border-l-4 {
+  position: relative;
+}
+
+.benchmark-result-view .border-l-4::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: linear-gradient(to bottom, #9333ea, #7c3aed);
+  border-radius: 2px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .benchmark-result-view .grid-cols-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .benchmark-report .grid-cols-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .benchmark-report .grid-cols-2 {
+    grid-template-columns: 1fr;
+  }
+}

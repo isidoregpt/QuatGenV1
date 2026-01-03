@@ -8,9 +8,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-from api.routes import molecules, generator, export, status
+from api.routes import molecules, generator, export, status, search, benchmark
 from database.connection import init_db, close_db
 from generator.engine import GeneratorEngine
+from data import ChEMBLFetcher, ReferenceDatabase
+from visualization.renderer import MoleculeRenderer
 
 # Configure logging
 logging.basicConfig(
@@ -22,29 +24,55 @@ logger = logging.getLogger(__name__)
 # Global generator engine instance
 generator_engine: GeneratorEngine | None = None
 
+# Global data fetchers
+chembl_fetcher: ChEMBLFetcher | None = None
+reference_db: ReferenceDatabase | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    global generator_engine
-    
+    global generator_engine, chembl_fetcher, reference_db
+
     # Startup
     logger.info("Starting Quat Generator Pro backend...")
-    
+
     # Initialize database
     await init_db()
     logger.info("Database initialized")
-    
-    # Initialize generator engine
+
+    # Initialize reference database (curated compounds - fast, no network)
+    reference_db = ReferenceDatabase()
+    await reference_db.initialize()
+    logger.info(f"Reference database initialized: {reference_db.compound_count} compounds")
+
+    # Initialize ChEMBL fetcher (experimental data from ChEMBL)
+    chembl_fetcher = ChEMBLFetcher(cache_dir="data/chembl_cache")
+    await chembl_fetcher.initialize()
+    logger.info(f"ChEMBL fetcher initialized: {chembl_fetcher.compound_count} compounds cached")
+
+    # Initialize generator engine with data sources for MIC predictor
     generator_engine = GeneratorEngine()
+    # Pass data sources to scoring pipeline before initialization
+    from scoring.pipeline import ScoringPipeline
+    generator_engine.scoring = ScoringPipeline()
+    generator_engine.scoring.reference_db = reference_db
+    generator_engine.scoring.chembl_fetcher = chembl_fetcher
     await generator_engine.initialize()
     logger.info("Generator engine initialized")
-    
+
+    # Initialize molecule renderer
+    molecule_renderer = MoleculeRenderer()
+    logger.info(f"Molecule renderer ready: {molecule_renderer.is_ready}")
+
     # Store in app state for access in routes
     app.state.generator = generator_engine
-    
+    app.state.chembl_fetcher = chembl_fetcher
+    app.state.reference_db = reference_db
+    app.state.molecule_renderer = molecule_renderer
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down...")
     if generator_engine:
@@ -75,6 +103,8 @@ app.include_router(molecules.router, prefix="/api/molecules", tags=["molecules"]
 app.include_router(generator.router, prefix="/api/generator", tags=["generator"])
 app.include_router(export.router, prefix="/api/export", tags=["export"])
 app.include_router(status.router, prefix="/api/status", tags=["status"])
+app.include_router(search.router, prefix="/api/search", tags=["search"])
+app.include_router(benchmark.router, prefix="/api/benchmark", tags=["benchmark"])
 
 
 @app.get("/")
@@ -93,7 +123,10 @@ async def health():
     return {
         "status": "healthy",
         "database": "connected",
-        "generator": "ready" if generator_engine and generator_engine.is_ready else "initializing"
+        "generator": "ready" if generator_engine and generator_engine.is_ready else "initializing",
+        "chembl_fetcher": "ready" if chembl_fetcher and chembl_fetcher.is_ready else "initializing",
+        "reference_db": "ready" if reference_db and reference_db.is_ready else "initializing",
+        "molecule_renderer": "ready" if hasattr(app.state, 'molecule_renderer') and app.state.molecule_renderer.is_ready else "unavailable"
     }
 
 
