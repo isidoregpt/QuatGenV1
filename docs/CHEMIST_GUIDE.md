@@ -1355,6 +1355,8 @@ The key innovation is **reinforcement learning**: as REINVENT generates molecule
 
 **Why it matters**: The quality of predictions depends entirely on training data quality. ChEMBL data comes from peer-reviewed sources, with standardized units and curated annotations—making it the gold standard for computational drug discovery.
 
+**Live Data Access**: In addition to using ChEMBL data for model training, Quat Generator Pro queries the ChEMBL API in real-time to retrieve bioactivity data for reference compounds and to validate predictions against known experimental values when available. This requires an internet connection during benchmarking operations.
+
 **Reference**: Mendez, D., et al. (2019). "ChEMBL: towards direct deposition of bioassay data." *Nucleic Acids Research*, 47(D1), D930-D940.
 
 ---
