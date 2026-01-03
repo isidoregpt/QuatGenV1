@@ -1313,6 +1313,85 @@ The original algorithm was extended with quaternary nitrogen-specific considerat
 
 ---
 
+### Appendix E: Understanding the AI Models
+
+*This appendix explains the AI components in plain language for chemists who may not be familiar with machine learning terminology.*
+
+---
+
+#### ChemBERTa: The Molecular Translator
+
+**HuggingFace Model ID**: `DeepChem/ChemBERTa-77M-MLM`
+
+**What it is**: A chemistry-specialized AI model that "reads" molecular structures written in SMILES notation and converts them into numerical representations that computers can work with.
+
+**How it works**: Imagine teaching someone to recognize molecules by showing them millions of examples. ChemBERTa was trained on approximately 77 million molecules, learning patterns like "these atoms tend to appear together" or "this arrangement is common in drug-like compounds." When you give it a new SMILES string, it produces a numerical fingerprint (a list of 768 numbers) that captures the molecule's key features—similar to how a mass spectrum captures molecular information, but encoding structural and chemical relationships rather than fragment masses.
+
+**What it does in Quat Generator Pro**: Every molecule you generate or search gets passed through ChemBERTa first. The numerical fingerprint it produces is then used to predict MIC values, calculate similarity between molecules, and assess ADMET properties. Think of it as the translation layer between chemical structures and the prediction algorithms.
+
+**Reference**: Chithrananda, S., Grand, G., & Ramsundar, B. (2020). "ChemBERTa: Large-Scale Self-Supervised Pretraining for Molecular Property Prediction." *NeurIPS Workshop on Machine Learning for Molecules*.
+
+---
+
+#### REINVENT: The Molecule Designer
+
+**What it is**: A generative AI model that proposes new molecular structures, specifically fine-tuned for quaternary ammonium compounds.
+
+**How it works**: REINVENT learns chemistry the way a child learns language—by seeing millions of examples and picking up the rules. After training on ~750 million molecules from the ZINC database, it learned that carbons form four bonds, aromatic rings are stable, certain functional groups appear together, and so on. When generating molecules, it builds SMILES strings one character at a time, using learned probabilities to decide what comes next. Invalid structures (five-valent carbons, impossible rings) are automatically rejected.
+
+The key innovation is **reinforcement learning**: as REINVENT generates molecules, it receives feedback based on your scoring criteria (efficacy, safety, environment, synthesis). Molecules that score well reinforce the patterns that created them; poor scores discourage those patterns. Over thousands of iterations, the model learns to preferentially generate structures matching your objectives—like a medicinal chemist who learns from every failed compound.
+
+**What it does in Quat Generator Pro**: This is the engine that creates novel quaternary ammonium structures. When you click "Generate," REINVENT proposes candidates optimized for your specified weights, exploring chemical space far beyond what manual enumeration could achieve.
+
+**Reference**: Olivecrona, M., Blaschke, T., Engkvist, O., & Chen, H. (2017). "Molecular de-novo design through deep reinforcement learning." *Journal of Cheminformatics*, 9(1), 48.
+
+---
+
+#### ChEMBL: The Activity Database
+
+**What it is**: The European Molecular Biology Laboratory's open database of bioactive molecules with measured biological activities—essentially a curated collection of structure-activity data from published literature.
+
+**How it's used**: ChEMBL provides the experimental MIC values, ADMET measurements, and other bioactivity data used to train the prediction models. When Quat Generator Pro predicts that a molecule will have an MIC of 2 µg/mL against *S. aureus*, that prediction is based on patterns learned from thousands of real measurements in ChEMBL.
+
+**Why it matters**: The quality of predictions depends entirely on training data quality. ChEMBL data comes from peer-reviewed sources, with standardized units and curated annotations—making it the gold standard for computational drug discovery.
+
+**Reference**: Mendez, D., et al. (2019). "ChEMBL: towards direct deposition of bioassay data." *Nucleic Acids Research*, 47(D1), D930-D940.
+
+---
+
+#### ZINC: The Chemical Grammar Teacher
+
+**What it is**: A free database of commercially available compounds, containing ~750 million drug-like molecules in ready-to-use formats.
+
+**How it's used**: ZINC provided the pre-training data for REINVENT. By learning from this vast library of synthesizable, drug-like molecules, REINVENT developed an understanding of what "reasonable" chemistry looks like before being fine-tuned specifically for quaternary ammoniums.
+
+**Why it matters**: Pre-training on ZINC means generated molecules tend to be synthesizable and drug-like by default—the model has internalized rules like Lipinski's Rule of Five without being explicitly programmed with them.
+
+**Reference**: Irwin, J.J., et al. (2020). "ZINC20—A Free Ultralarge-Scale Chemical Database for Ligand Discovery." *Journal of Chemical Information and Modeling*, 60(12), 6065-6073.
+
+---
+
+#### Summary: How the Components Work Together
+
+| Component | Role | Training Data | Output |
+|-----------|------|---------------|--------|
+| **ChemBERTa** | Molecular encoder | 77M molecules | 768-dimensional fingerprint |
+| **REINVENT** | Structure generator | 750M molecules (ZINC) | Novel SMILES strings |
+| **ChEMBL** | Activity database | Published literature | MIC values, ADMET data |
+| **ZINC** | Pre-training corpus | Commercial compounds | Chemical "grammar" rules |
+
+**The workflow**:
+1. You set your optimization weights (efficacy, safety, etc.)
+2. **REINVENT** generates candidate SMILES strings using patterns learned from **ZINC**
+3. **ChemBERTa** converts each SMILES to a numerical fingerprint
+4. Prediction models (trained on **ChEMBL** data) score each fingerprint
+5. Scores feed back to REINVENT, which learns to generate better candidates
+6. Top candidates are presented for your review
+
+This cycle repeats thousands of times during a generation run, progressively improving the quality of proposed structures.
+
+--
+
 ## Document Information
 
 **Version**: 1.0  
