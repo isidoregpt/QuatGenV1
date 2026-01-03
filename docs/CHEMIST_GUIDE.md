@@ -1112,9 +1112,9 @@ Export your 20 selections to CSV. Sort by SA score descending. This is your synt
 #### Octenidine Dihydrochloride
 
 - **CAS Number**: 70775-75-6
-- **PubChem CID**: 51166
-- **Structure**: Bis-cationic bis(pyridinyl-imino) derivative with decamethylene linker
-- **SMILES**: `CCCCCCCCN=C1C=CN(C=C1)CCCCCCCCCCN2C=CC(=NCCCCCCCC)C=C2.Cl.Cl`
+- **PubChem CID**: 402617
+- **Structure**: Bis-biguanide with octamethylene (C8) linker connecting two 4-tert-butylphenyl-biguanide units
+- **SMILES**: `CC(C)(C)c1ccc(NC(=N)NC(=N)NCCCCCCCCNC(=N)NC(=N)Nc2ccc(C(C)(C)C)cc2)cc1.[Cl-].[Cl-]`
 - **Molecular Weight**: 623.8 Da
 
 **Typical MIC Values (µg/mL)**:
