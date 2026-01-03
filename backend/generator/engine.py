@@ -3,6 +3,8 @@
 import asyncio
 import time
 import logging
+import copy
+import random
 from typing import Optional, Dict, List, Callable
 from dataclasses import dataclass, field
 import torch
@@ -21,11 +23,49 @@ from database import queries
 logger = logging.getLogger(__name__)
 
 
+# Quaternary ammonium scaffold seeds for generation
+# These are partial SMILES that contain the essential quat nitrogen
+# The model will complete/elaborate these scaffolds
+QUAT_SCAFFOLDS = [
+    # Benzalkonium-type (benzyl + long chain + trimethyl ammonium)
+    "CCCCCCCCCCCC[N+](C)(C)Cc1ccccc1",
+    "CCCCCCCCCCCCCC[N+](C)(C)Cc1ccccc1",
+    "CCCCCCCCCCCCCCCC[N+](C)(C)Cc1ccccc1",
+    
+    # DDAC-type (two long chains + dimethyl ammonium)  
+    "CCCCCCCCCC[N+](C)(C)CCCCCCCCCC",
+    "CCCCCCCCCCCC[N+](C)(C)CCCCCCCCCC",
+    
+    # Cetrimonium-type (single long chain + trimethyl ammonium)
+    "CCCCCCCCCCCCCCCC[N+](C)(C)C",
+    "CCCCCCCCCCCC[N+](C)(C)C",
+    "CCCCCCCCCCCCCC[N+](C)(C)C",
+    
+    # Pyridinium-type (alkyl pyridinium)
+    "CCCCCCCCCCCCCCCC[n+]1ccccc1",
+    "CCCCCCCCCCCC[n+]1ccccc1",
+    
+    # Domiphen-type (phenoxyethyl + long chain)
+    "CCCCCCCCCCCC[N+](C)(C)CCOc1ccccc1",
+    
+    # Variation scaffolds - shorter chains for diversity
+    "CCCCCCCC[N+](C)(C)Cc1ccccc1",
+    "CCCCCCCC[N+](C)(C)C",
+    "CCCCCCCC[N+](C)(C)CCCCCCCC",
+]
+
+# Counterions to append
+COUNTERIONS = [".[Cl-]", ".[Br-]", ".[I-]"]
+
+
 @dataclass
 class GenerationConfig:
     # Pretrained model settings
     use_pretrained: bool = True
     pretrained_model_name: str = "Franso/reinvent_171M_prior"
+    # Generation mode
+    use_scaffold_generation: bool = True  # NEW: Use scaffold-based generation
+    scaffold_ratio: float = 0.8  # Ratio of scaffold-based vs free generation
     # Random policy settings (used as fallback or when use_pretrained=False)
     vocab_size: int = 500
     d_model: int = 256
@@ -103,6 +143,9 @@ class GeneratorEngine:
         # Molecular filtering and diversity
         self.molecular_filter: Optional[MolecularFilter] = None
         self.diversity_selector: Optional[DiversitySelector] = None
+        # Scaffold generation
+        self._quat_scaffolds = QUAT_SCAFFOLDS.copy()
+        self._counterions = COUNTERIONS.copy()
     
     @property
     def is_ready(self) -> bool:
@@ -189,13 +232,13 @@ class GeneratorEngine:
                 "valid_ratio": self._rl_metrics.valid_ratio,
                 "unique_ratio": self._rl_metrics.unique_ratio,
                 "diversity": self._rl_metrics.diversity,
-                "mean_nll": self._rl_metrics.mean_nll,
+                "mean_nll": self._rl_metrics.mean_nll if hasattr(self._rl_metrics, 'mean_nll') else 0,
                 "kl_divergence": self._rl_metrics.kl_divergence,
             }
 
         if self.reinvent_trainer:
             status["replay_buffer_size"] = len(self.reinvent_trainer.replay_buffer)
-            status["diversity_filter_size"] = len(self.reinvent_trainer.diversity_filter)
+            status["diversity_filter_size"] = len(self.reinvent_trainer.diversity_filter) if self.reinvent_trainer.diversity_filter else 0
 
         return status
 
@@ -257,6 +300,11 @@ class GeneratorEngine:
         self.molecular_filter = MolecularFilter(filter_config)
         self.diversity_selector = DiversitySelector(similarity_threshold=0.7)
         logger.info("Molecular filters initialized")
+        
+        # Log scaffold generation mode
+        if self.config.use_scaffold_generation:
+            logger.info(f"Scaffold-based quat generation enabled (ratio: {self.config.scaffold_ratio})")
+            logger.info(f"Loaded {len(self._quat_scaffolds)} quat scaffolds")
 
         logger.info("Generator engine ready")
     
@@ -282,14 +330,133 @@ class GeneratorEngine:
             kl_weight=self.config.rl_kl_weight,
         )
 
+        # Create agent model as a copy of the prior (agent will be fine-tuned, prior stays frozen)
+        agent_model = copy.deepcopy(self.pretrained_generator.model)
+        agent_model.to(self.config.device)
+        agent_model.train()  # Agent is trainable
+        
+        # Store reference to agent model for later use
+        self._agent_model = agent_model
+        
+        # Create a default scoring function that wraps our scoring pipeline
+        # This async function is used for scoring molecules during RL training
+        async def default_scoring_function(smiles: str) -> dict:
+            try:
+                return await self.scoring.score_molecule(smiles)
+            except Exception as e:
+                logger.warning(f"Scoring failed for {smiles}: {e}")
+                return {"efficacy": 0, "safety": 0, "environmental": 0, "sa_score": 0}
+
         self.reinvent_trainer = ReinventTrainer(
             prior_model=self.pretrained_generator.model,
+            agent_model=agent_model,
             tokenizer=self.pretrained_generator.tokenizer,
+            scoring_function=default_scoring_function,
             config=reinvent_config,
             device=self.config.device,
         )
 
         logger.info("REINVENT trainer initialized successfully")
+
+    def _generate_quat_from_scaffold(self, num_molecules: int) -> List[str]:
+        """
+        Generate quaternary ammonium compounds using scaffold-based approach.
+        
+        This method:
+        1. Randomly selects quat scaffolds
+        2. Optionally uses the pretrained model to elaborate/complete them
+        3. Adds counterions
+        4. Returns valid SMILES
+        """
+        generated = []
+        
+        for _ in range(num_molecules):
+            # Select a random scaffold
+            scaffold = random.choice(self._quat_scaffolds)
+            
+            # Decide generation strategy
+            strategy = random.random()
+            
+            if strategy < 0.5:
+                # Strategy 1: Use scaffold directly with random counterion
+                counterion = random.choice(self._counterions)
+                smiles = scaffold + counterion
+                generated.append(smiles)
+                
+            elif strategy < 0.8 and self.pretrained_generator and self.pretrained_generator.is_ready:
+                # Strategy 2: Use model to elaborate scaffold
+                try:
+                    elaborated = self.pretrained_generator.generate_from_scaffold(
+                        scaffold_smiles=scaffold,
+                        num_samples=1,
+                        temperature=self.config.temperature,
+                        top_k=self.config.top_k,
+                        top_p=self.config.top_p,
+                        max_length=64  # Shorter for scaffold completion
+                    )
+                    if elaborated:
+                        smiles = elaborated[0]
+                        # Add counterion if not present
+                        if "[Cl-]" not in smiles and "[Br-]" not in smiles and "[I-]" not in smiles:
+                            if "[N+]" in smiles or "[n+]" in smiles:
+                                smiles += random.choice(self._counterions)
+                        generated.append(smiles)
+                    else:
+                        # Fallback to direct scaffold
+                        counterion = random.choice(self._counterions)
+                        generated.append(scaffold + counterion)
+                except Exception as e:
+                    logger.debug(f"Scaffold elaboration failed: {e}")
+                    # Fallback to direct scaffold
+                    counterion = random.choice(self._counterions)
+                    generated.append(scaffold + counterion)
+                    
+            else:
+                # Strategy 3: Combinatorial variation
+                smiles = self._generate_combinatorial_quat()
+                if smiles:
+                    generated.append(smiles)
+        
+        return generated
+    
+    def _generate_combinatorial_quat(self) -> str:
+        """
+        Generate a quat using combinatorial chemistry rules.
+        
+        Assembles a quat from:
+        - Head group (benzyl, methyl, hydroxyethyl, etc.)
+        - Chain length (C8-C18)
+        - Counterion
+        """
+        # Chain lengths
+        chain_lengths = [8, 10, 12, 14, 16, 18]
+        chain_length = random.choice(chain_lengths)
+        chain = "C" * chain_length
+        
+        # Head groups
+        head_groups = [
+            # Benzalkonium-type
+            f"{chain}[N+](C)(C)Cc1ccccc1",
+            # Trimethyl-type  
+            f"{chain}[N+](C)(C)C",
+            # Dimethyl with second chain
+            f"{chain}[N+](C)(C){'C' * random.choice([8, 10, 12])}",
+            # Hydroxyethyl
+            f"{chain}[N+](C)(C)CCO",
+            # Pyridinium
+            f"{chain}[n+]1ccccc1",
+            # Benzethonium-type
+            f"{chain}[N+](C)(C)CCOc1ccccc1",
+            # Ethyl benzyl
+            f"{chain}[N+](C)(CC)Cc1ccccc1",
+            # Diethyl methyl
+            f"{chain}[N+](CC)(CC)C",
+        ]
+        
+        scaffold = random.choice(head_groups)
+        counterion = random.choice(self._counterions)
+        
+        return scaffold + counterion
 
     async def start_rl_training(
         self,
@@ -316,7 +483,7 @@ class GeneratorEngine:
                     break
 
                 # Run one training step
-                metrics = self.reinvent_trainer.train_step(scoring_function)
+                metrics = await self.reinvent_trainer.train_step()
                 self._rl_metrics = metrics
 
                 # Call callback if provided
@@ -331,7 +498,7 @@ class GeneratorEngine:
                     )
 
                 # Check for early stopping
-                if self.reinvent_trainer._check_early_stopping():
+                if self.reinvent_trainer.steps_without_improvement >= self.reinvent_trainer.config.early_stop_patience:
                     logger.info(f"Early stopping at step {step}")
                     break
 
@@ -411,11 +578,11 @@ class GeneratorEngine:
                     break
 
                 # Run RL training step
-                metrics = self.reinvent_trainer.train_step(scoring_function)
+                metrics = await self.reinvent_trainer.train_step()
                 self._rl_metrics = metrics
 
                 # Generate molecules using fine-tuned agent
-                molecules = self.reinvent_trainer._generate_batch(batch_size)
+                molecules, _ = self.reinvent_trainer._generate_batch(batch_size)
 
                 # Score and store valid molecules
                 valid_molecules, scores = await self._score_batch(molecules, quat_constraints)
@@ -438,6 +605,8 @@ class GeneratorEngine:
     async def run_generation(self, num_molecules: int, constraints: dict, weights: dict,
                             batch_size: int = 64, use_gpu: bool = True, num_workers: int = 8):
         logger.info(f"Starting generation: target={num_molecules}, batch={batch_size}")
+        logger.info(f"Scaffold generation: {self.config.use_scaffold_generation}")
+        
         self.state = GenerationState(is_running=True, start_time=time.time(),
                                      total_batches=num_molecules // batch_size + 1)
         self._stop_requested = False
@@ -445,22 +614,33 @@ class GeneratorEngine:
         
         try:
             while self.state.molecules_valid < num_molecules and not self._stop_requested:
+                # Generate batch using scaffold-based approach for quats
                 molecules = await self._generate_batch(batch_size)
+                
+                # Log generation progress
+                if self.state.current_batch % 5 == 0:
+                    logger.info(f"Batch {self.state.current_batch}: generated {len(molecules)} molecules, "
+                               f"valid so far: {self.state.molecules_valid}/{num_molecules}")
+                
                 valid_molecules, scores = await self._score_batch(molecules, quat_constraints)
-                rewards = self._calculate_rewards(scores, weights)
+                
                 if valid_molecules:
+                    logger.info(f"Found {len(valid_molecules)} valid quats in batch {self.state.current_batch}")
+                    rewards = self._calculate_rewards(scores, weights)
                     await self._update_policy(valid_molecules, rewards)
-                await self._store_molecules(valid_molecules, scores)
-                await self._update_pareto()
+                    await self._store_molecules(valid_molecules, scores)
+                    await self._update_pareto()
+                    self._update_best_scores(scores)
+                
                 self.state.current_batch += 1
                 self.state.molecules_generated += len(molecules)
                 self.state.molecules_valid += len(valid_molecules)
-                if scores:
-                    self._update_best_scores(scores)
+                
                 await asyncio.sleep(0.01)
         finally:
             self.state.is_running = False
-            logger.info(f"Generation complete: {self.state.molecules_valid} valid molecules")
+            logger.info(f"Generation complete: {self.state.molecules_valid} valid molecules from "
+                       f"{self.state.molecules_generated} total generated")
     
     async def stop(self):
         self._stop_requested = True
@@ -468,8 +648,37 @@ class GeneratorEngine:
             await asyncio.sleep(0.1)
     
     async def _generate_batch(self, batch_size: int) -> List[str]:
+        """
+        Generate a batch of molecules, using scaffold-based generation for quats.
+        """
+        # Use scaffold-based generation for quaternary ammonium compounds
+        if self.config.use_scaffold_generation:
+            # Mix of scaffold-based and model-based generation
+            scaffold_count = int(batch_size * self.config.scaffold_ratio)
+            model_count = batch_size - scaffold_count
+            
+            molecules = []
+            
+            # Generate using scaffolds (guaranteed to have quat nitrogen)
+            if scaffold_count > 0:
+                scaffold_molecules = self._generate_quat_from_scaffold(scaffold_count)
+                molecules.extend(scaffold_molecules)
+            
+            # Generate using model (may or may not be quats)
+            if model_count > 0 and self._use_pretrained_for_generation and self.pretrained_generator is not None:
+                model_molecules = self.pretrained_generator.generate(
+                    batch_size=model_count,
+                    temperature=self.config.temperature,
+                    top_k=self.config.top_k,
+                    top_p=self.config.top_p,
+                    max_length=self.config.max_len
+                )
+                molecules.extend(model_molecules)
+            
+            return molecules
+        
+        # Original generation logic (non-scaffold)
         if self._use_pretrained_for_generation and self.pretrained_generator is not None:
-            # Use pretrained model for generation
             return self.pretrained_generator.generate(
                 batch_size=batch_size,
                 temperature=self.config.temperature,
@@ -501,7 +710,8 @@ class GeneratorEngine:
                 score = await self.scoring.score_molecule(smiles)
                 valid_smiles.append(smiles)
                 scores.append(score)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Scoring failed for {smiles}: {e}")
                 continue
         return valid_smiles, scores
     
@@ -561,6 +771,8 @@ class GeneratorEngine:
             "temperature": self.config.temperature,
             "use_pretrained": self.config.use_pretrained,
             "using_pretrained": self._use_pretrained_for_generation,
+            "use_scaffold_generation": self.config.use_scaffold_generation,
+            "scaffold_ratio": self.config.scaffold_ratio,
         }
         if self._use_pretrained_for_generation and self.pretrained_generator:
             config["pretrained_model"] = self.config.pretrained_model_name

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 from database.connection import get_db
@@ -32,7 +33,8 @@ class MoleculeResponse(MoleculeBase):
     is_valid_quat: bool = True
     is_pareto: bool = False
     is_starred: bool = False
-    created_at: str
+    created_at: datetime  # FIXED: Changed from str to datetime
+    
     class Config:
         from_attributes = True
 
