@@ -17,6 +17,8 @@
 7. [Quick Reference](#7-quick-reference)
 8. [Appendices](#8-appendices)
 
+> 📖 **In a hurry?** Skip to [Section 4.2: Generating New Molecules](#42-generating-new-molecules) to start immediately, or [Section 7: Quick Reference](#7-quick-reference) for a one-page summary.
+
 ---
 
 ## 1. Executive Summary
@@ -65,6 +67,8 @@ AI-assisted design addresses these limitations by:
 #### The REINVENT Generative Model
 
 At the heart of Quat Generator Pro is REINVENT, a 171-million parameter deep learning model that has "learned the grammar of chemistry." Think of it as a language model, but instead of predicting the next word in a sentence, it predicts the next atom or bond in a molecular structure.
+
+> 🧪 **A Chemistry Analogy**: Imagine teaching a chemist to draw molecules by showing them millions of examples. Eventually, they learn the "rules"—carbons make four bonds, aromatic rings are stable, certain groups appear together. REINVENT learned these rules from 750 million molecules, so when it draws new structures, they're chemically sensible.
 
 **Training Foundation**: REINVENT was trained on millions of molecules from public databases (ZINC, ChEMBL) before being fine-tuned specifically for quaternary ammonium generation. Through this training, the model learned:
 
@@ -378,6 +382,8 @@ When you open Quat Generator Pro, you see three main areas:
 
 **Right Detail Panel**: When you click on a molecule, detailed information appears here including full property breakdowns, predicted MIC values, and ADMET predictions.
 
+*[DIAGRAM: Screenshot of main interface with labeled components — Left sidebar showing controls, Central grid displaying molecule cards with scores, Right panel showing detailed property breakdown for selected molecule]*
+
 #### The Three Main Tabs
 
 | Tab | Purpose | When to Use |
@@ -424,7 +430,9 @@ The objective weights determine how the AI prioritizes different properties duri
 - Increase when: Rapid prototyping needed; limited synthetic resources; early screening of many compounds
 - Decrease when: Willing to invest in complex synthesis for optimal candidates
 
-> **Tip**: For a first run, use the defaults. Adjust weights based on what you learn about the generated candidates.
+> 💡 **Tip**: For a first run, use the defaults. Adjust weights based on what you learn about the generated candidates.
+
+*[DIAGRAM: Flowchart showing Generation → Filtering → Benchmarking → Synthesis Queue workflow]*
 
 #### Generation Parameters
 
@@ -595,6 +603,8 @@ Results show a ranked table with:
 | **50-64** | Moderate - Has merit but also weaknesses | Consider structural modifications; synthesize if resources allow |
 | **35-49** | Below average - Significant concerns | Deprioritize unless unique scaffold of interest |
 | **0-34** | Poor - Multiple liabilities | Do not pursue; move to different chemical space |
+
+*[DIAGRAM: Example molecule card with score annotations — showing where efficacy, safety, environmental, and SA scores appear, color coding explanation, and how to read the combined score]*
 
 #### Efficacy Score Deep Dive
 
@@ -916,7 +926,7 @@ Export your 20 selections to CSV. Sort by SA score descending. This is your synt
 | **SMILES** | Simplified Molecular Input Line Entry System; a text representation of molecular structure (e.g., CCO for ethanol) |
 | **SMARTS** | SMILES Arbitrary Target Specification; a pattern language for substructure searching |
 | **Tanimoto Similarity** | A measure of structural similarity between two molecules (0 = no similarity, 1 = identical) |
-| **SA Score** | Synthetic Accessibility Score (1-10); lower values indicate easier synthesis |
+| **SA Score** | Synthetic Accessibility Score; in Quat Generator Pro, displayed as 0-100 where higher = easier synthesis (see note below) |
 | **ADMET** | Absorption, Distribution, Metabolism, Excretion, Toxicity; pharmacokinetic and safety properties |
 | **MIC** | Minimum Inhibitory Concentration; lowest concentration that prevents visible microbial growth |
 | **hERG** | Human ether-à-go-go related gene; a cardiac ion channel; inhibition causes arrhythmia risk |
@@ -928,6 +938,8 @@ Export your 20 selections to CSV. Sort by SA score descending. This is your synt
 | **DILI** | Drug-Induced Liver Injury; hepatotoxicity risk |
 | **BBB** | Blood-Brain Barrier; penetration indicates potential CNS effects |
 | **Pareto Frontier** | Set of candidates where no single property can be improved without worsening another |
+
+> ⚠️ **Note on SA Score Display**: The original SA Score algorithm (Ertl & Schuffenhauer) outputs values from 1-10, where **lower values indicate easier synthesis**. Quat Generator Pro converts this to a 0-100 scale where **higher values indicate easier synthesis** for consistency with other scores. The conversion formula is: `displayed_score = (10 - raw_SA_score) / 9 × 100`.
 
 ---
 
@@ -1100,9 +1112,10 @@ Export your 20 selections to CSV. Sort by SA score descending. This is your synt
 #### Octenidine Dihydrochloride
 
 - **CAS Number**: 70775-75-6
-- **Structure**: Bis-cationic biguanide derivative
-- **SMILES**: `CCCCCCCCCCN=C(N)N=C(N)c1ccc(C(C)(C)C)cc1.CCCCCCCCCCN=C(N)N=C(N)c1ccc(C(C)(C)C)cc1.[Cl-].[Cl-]`
-- **Molecular Weight**: 625.8 Da
+- **PubChem CID**: 51166
+- **Structure**: Bis-cationic bis(pyridinyl-imino) derivative with decamethylene linker
+- **SMILES**: `CCCCCCCCN=C1C=CN(C=C1)CCCCCCCCCCN2C=CC(=NCCCCCCCC)C=C2.Cl.Cl`
+- **Molecular Weight**: 623.8 Da
 
 **Typical MIC Values (µg/mL)**:
 - *S. aureus*: 0.25-2 (excellent—best in class)
@@ -1238,6 +1251,110 @@ The original algorithm was extended with quaternary nitrogen-specific considerat
 - Penalty for multiple quaternary centers
 
 **Reference**: Ertl, P. & Schuffenhauer, A. (2009). "Estimation of synthetic accessibility score of drug-like molecules based on molecular complexity and fragment contributions." *Journal of Cheminformatics*, 1, 8.
+
+---
+
+### Appendix D: One-Page Quick Reference (Printable)
+
+---
+
+#### QUAT GENERATOR PRO — QUICK REFERENCE CARD
+
+---
+
+**SCORE INTERPRETATION**
+
+| Score | Rating | Action |
+|-------|--------|--------|
+| **80-100** | Excellent | Fast-track for synthesis |
+| **65-79** | Good | Include in synthesis queue |
+| **50-64** | Moderate | Consider modifications |
+| **<50** | Poor | Deprioritize or skip |
+
+---
+
+**WEIGHT PRESETS**
+
+| Preset | Efficacy | Safety | Environ. | Synthesis | Best For |
+|--------|----------|--------|----------|-----------|----------|
+| **Discovery (Default)** | 40% | 30% | 15% | 15% | Balanced exploration |
+| **Safety-Focused** | 35% | 45% | 10% | 10% | Clinical/consumer products |
+| **Green Chemistry** | 30% | 20% | 35% | 15% | Environmental compliance |
+| **Rapid Prototyping** | 30% | 25% | 15% | 30% | Quick synthesis screening |
+
+---
+
+**MIC INTERPRETATION**
+
+| MIC (µg/mL) | Class | Comparable To |
+|-------------|-------|---------------|
+| ≤1 | Excellent | Octenidine |
+| 1-4 | Very Good | Best commercial quats |
+| 4-8 | Good | BAC, CPC |
+| 8-32 | Moderate | Limited applications |
+| >32 | Weak/Inactive | Not recommended |
+
+---
+
+**FIRST RUN CHECKLIST**
+
+- [ ] Python 3.11+ installed
+- [ ] Node.js LTS installed
+- [ ] Application extracted to folder without spaces
+- [ ] Setup script completed ("Setup complete!" message)
+- [ ] Both terminal windows open after starting
+- [ ] Browser loads http://localhost:5173
+- [ ] First model download complete (~15 min wait)
+- [ ] Test generation of 5 molecules successful
+
+---
+
+**COMMON PATTERNS (SEARCH TAB)**
+
+| To Find... | Select Pattern |
+|------------|----------------|
+| All quats | Any Quaternary |
+| BAC-like | Benzyl Quat |
+| CPC-like | Pyridinium |
+| DDAC-like | Twin Chain |
+| Long-chain | Long Chain (C12+) |
+
+---
+
+**KEY KEYBOARD SHORTCUTS**
+
+| Action | Shortcut |
+|--------|----------|
+| Start generation | Enter (when in Generate tab) |
+| Stop generation | Escape |
+| Clear filters | Ctrl/Cmd + R |
+| Export selected | Ctrl/Cmd + E |
+
+---
+
+**TROUBLESHOOTING QUICK FIXES**
+
+| Issue | Try This |
+|-------|----------|
+| "Model not loaded" | Wait 10-15 min for download |
+| Slow generation | Normal on CPU; enable GPU if available |
+| No search results | Broaden pattern or lower threshold |
+| Low scores on all | Compounds may be outside training domain |
+
+---
+
+**REFERENCE COMPOUND BENCHMARKS**
+
+| Compound | Efficacy | Safety | Environ. | Best Feature |
+|----------|----------|--------|----------|--------------|
+| BAC | ~80 | ~60 | ~55 | Broad-spectrum |
+| CPC | ~85 | ~65 | ~55 | Oral safety |
+| DDAC | ~82 | ~55 | ~75 | Biodegradable |
+| Octenidine | ~95 | ~85 | ~60 | Best overall |
+
+---
+
+*Print this page and keep at your workstation for quick reference.*
 
 ---
 
