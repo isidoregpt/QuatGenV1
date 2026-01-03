@@ -153,4 +153,177 @@ export const moleculeApi = {
   }
 };
 
+// Search API types and methods
+
+export interface SearchPattern {
+  name: string;
+  smarts: string;
+  description: string;
+  category: string;
+}
+
+export interface SubstructureSearchRequest {
+  smarts: string;
+  max_results?: number;
+  require_quat?: boolean;
+  min_efficacy?: number;
+  min_safety?: number;
+}
+
+export interface SimilaritySearchRequest {
+  smiles: string;
+  threshold?: number;
+  max_results?: number;
+}
+
+export interface SearchResult {
+  smiles: string;
+  molecule_id: number | null;
+  name?: string;
+  match_count: number;
+  match_atoms: number[][];
+  scores: {
+    efficacy?: number;
+    safety?: number;
+    sa?: number;
+  };
+  metadata?: Record<string, any>;
+}
+
+export interface SimilarityResult {
+  smiles: string;
+  molecule_id: number | null;
+  name?: string;
+  similarity: number;
+  scores: {
+    efficacy_score?: number;
+    safety_score?: number;
+    sa_score?: number;
+  };
+}
+
+export interface SubstructureSearchResponse {
+  query: string;
+  results: SearchResult[];
+  total_searched: number;
+}
+
+export interface SimilaritySearchResponse {
+  query: string;
+  threshold: number;
+  results: SimilarityResult[];
+}
+
+export interface PatternsResponse {
+  all_patterns: Record<string, string>;
+  quat_patterns: Record<string, string>;
+}
+
+export const searchApi = {
+  /**
+   * Get available SMARTS patterns
+   */
+  getPatterns: async (): Promise<PatternsResponse> => {
+    const response = await fetch(`${API_BASE}/search/patterns`);
+    if (!response.ok) throw new Error('Failed to fetch patterns');
+    return response.json();
+  },
+
+  /**
+   * Validate SMARTS pattern
+   */
+  validateSmarts: async (smarts: string): Promise<{ smarts: string; is_valid: boolean; error: string | null }> => {
+    const params = new URLSearchParams({ smarts });
+    const response = await fetch(`${API_BASE}/search/validate?${params}`, {
+      method: 'POST'
+    });
+    if (!response.ok) throw new Error('Failed to validate SMARTS');
+    return response.json();
+  },
+
+  /**
+   * Substructure search
+   */
+  substructureSearch: async (request: SubstructureSearchRequest): Promise<SearchResult[]> => {
+    const response = await fetch(`${API_BASE}/search/substructure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    if (!response.ok) throw new Error('Search failed');
+    return response.json();
+  },
+
+  /**
+   * Similarity search
+   */
+  similaritySearch: async (request: SimilaritySearchRequest): Promise<SimilarityResult[]> => {
+    const response = await fetch(`${API_BASE}/search/similarity`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    if (!response.ok) throw new Error('Search failed');
+    return response.json();
+  },
+
+  /**
+   * Classify quat type
+   */
+  classifyQuat: async (smiles: string): Promise<{
+    smiles: string;
+    is_quat: boolean;
+    quat_type: string | null;
+  }> => {
+    const params = new URLSearchParams({ smiles });
+    const response = await fetch(`${API_BASE}/search/classify?${params}`, {
+      method: 'POST'
+    });
+    if (!response.ok) throw new Error('Classification failed');
+    return response.json();
+  },
+
+  /**
+   * Get structural features
+   */
+  getFeatures: async (smiles: string): Promise<{
+    smiles: string;
+    features: Record<string, boolean | string | null>;
+  }> => {
+    const params = new URLSearchParams({ smiles });
+    const response = await fetch(`${API_BASE}/search/features?${params}`, {
+      method: 'POST'
+    });
+    if (!response.ok) throw new Error('Failed to get features');
+    return response.json();
+  },
+
+  /**
+   * Check if molecule has quat nitrogen
+   */
+  checkHasQuat: async (smiles: string): Promise<{
+    smiles: string;
+    has_quat_nitrogen: boolean;
+  }> => {
+    const params = new URLSearchParams({ smiles });
+    const response = await fetch(`${API_BASE}/search/quat-check?${params}`);
+    if (!response.ok) throw new Error('Check failed');
+    return response.json();
+  },
+
+  /**
+   * Get search status
+   */
+  getStatus: async (): Promise<{
+    available: boolean;
+    features: Record<string, boolean>;
+    common_patterns: number;
+    quat_patterns: number;
+  }> => {
+    const response = await fetch(`${API_BASE}/search/status`);
+    if (!response.ok) throw new Error('Failed to fetch status');
+    return response.json();
+  }
+};
+
 export default moleculeApi;

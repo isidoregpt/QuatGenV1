@@ -1,0 +1,149 @@
+/* Search component styles */
+
+.search-panel {
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+.search-results {
+  border-top: 1px solid #374151;
+  padding-top: 1rem;
+}
+
+.search-result-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.search-result-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.pattern-selector {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* Range input styling for dark theme */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+}
+
+input[type="range"]::-webkit-slider-track {
+  background: #374151;
+  height: 6px;
+  border-radius: 3px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  background: #10b981;
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  margin-top: -5px;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: #059669;
+}
+
+input[type="range"]::-moz-range-track {
+  background: #374151;
+  height: 6px;
+  border-radius: 3px;
+}
+
+input[type="range"]::-moz-range-thumb {
+  background: #10b981;
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  background: #059669;
+}
+
+/* Line clamp utility */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Scrollbar styling for search results */
+.search-results::-webkit-scrollbar {
+  width: 6px;
+}
+
+.search-results::-webkit-scrollbar-track {
+  background: #1f2937;
+  border-radius: 3px;
+}
+
+.search-results::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 3px;
+}
+
+.search-results::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* Pattern selector scrollbar */
+.pattern-selector::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pattern-selector::-webkit-scrollbar-track {
+  background: #374151;
+  border-radius: 3px;
+}
+
+.pattern-selector::-webkit-scrollbar-thumb {
+  background: #6b7280;
+  border-radius: 3px;
+}
+
+/* Search mode toggle animation */
+.search-panel button[class*="rounded-lg"] {
+  transition: all 0.2s ease-in-out;
+}
+
+/* Input focus states */
+.search-panel input:focus {
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+/* Loading state in search button */
+.search-panel .loading-spinner {
+  border-width: 2px;
+}
+
+/* Results grid responsive */
+@media (max-width: 640px) {
+  .search-results .grid-cols-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Pattern card hover effect */
+.pattern-selector button:hover {
+  transform: translateY(-1px);
+}
+
+/* SMARTS validation indicator animation */
+.search-panel input + span {
+  transition: opacity 0.2s ease-in-out;
+}
