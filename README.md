@@ -1,63 +1,82 @@
 # Quat Generator Pro
 
-**AI-powered quaternary ammonium compound designer for next-generation disinfectants**
+AI-powered molecular design tool for quaternary ammonium antimicrobial compounds.
 
-A desktop application for chemists to design novel quaternary ammonium compounds (quats) optimized for:
-- **Efficacy**: Antimicrobial activity against bacteria, fungi, and viruses
-- **Safety**: Low human toxicity (acute, dermal, ocular)
-- **Environment**: Biodegradability, low aquatic toxicity, minimal bioaccumulation
-- **Synthesizability**: Practical synthetic accessibility scores
+## Features
+
+- **ML-Powered Generation**: Uses pretrained molecular transformers (REINVENT)
+- **Multi-Objective Optimization**: Balance efficacy, safety, environment, synthesis
+- **ADMET Prediction**: ChemFM models for toxicity and ADME properties
+- **MIC Prediction**: Estimate antimicrobial activity against pathogens
+- **Substructure Search**: SMARTS-based molecular search
+- **Benchmarking**: Compare to known quaternary ammonium disinfectants
+- **Structure Visualization**: 2D depictions with highlighting
 
 ## Quick Start
 
-### Backend Setup
-
 ```bash
+# Clone repository
+git clone https://github.com/your-org/quat-generator-pro.git
+cd quat-generator-pro
+
+# Start backend
 cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
-```
+uvicorn api.main:app --reload
 
-### Frontend Setup
-
-```bash
+# Start frontend (new terminal)
 cd frontend
 npm install
 npm run dev
 ```
 
+Open http://localhost:5173
+
+## Documentation
+
+- [User Guide](docs/USER_GUIDE.md)
+- [API Reference](docs/API_REFERENCE.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Development](docs/DEVELOPMENT.md)
+
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         ELECTRON FRONTEND                                │
+│                         REACT FRONTEND                                   │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
-│  │  Generator  │  │   Results   │  │  Molecule   │  │   Export    │    │
-│  │  Controls   │  │   Table     │  │   Detail    │  │   Modal     │    │
+│  │  Generator  │  │   Search    │  │  Benchmark  │  │   Results   │    │
+│  │  Controls   │  │   Panel     │  │   Panel     │  │   Table     │    │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘    │
 └─────────────────────────────────────────────────────────────────────────┘
-                                    │ HTTP/WebSocket
-                                    ▼
+                                   │ HTTP/WebSocket
+                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         FASTAPI BACKEND                                  │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
 │  │                      API Routes                                  │   │
-│  │  /generate  /molecules  /scores  /export  /status               │   │
+│  │  /generate  /molecules  /search  /benchmark  /visualization     │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                 │
-│  │  Generator   │  │   Scoring    │  │   Database   │                 │
-│  │   Engine     │  │   Pipeline   │  │   (SQLite)   │                 │
-│  │  (RL+AIS)    │  │  (QSAR+ML)   │  │              │                 │
+│  │  Generator   │  │   Scoring    │  │  ML Models   │                 │
+│  │   Engine     │  │   Pipeline   │  │  (HuggingFace)│                 │
+│  │  (REINVENT)  │  │  (ADMET+MIC) │  │              │                 │
 │  └──────────────┘  └──────────────┘  └──────────────┘                 │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Models Used
+
+| Component | Model | Source |
+|-----------|-------|--------|
+| Generator | REINVENT 171M | HuggingFace |
+| Encoder | ChemBERTa-77M | DeepChem |
+| ADMET | ChemFM suite | HuggingFace |
+
 ## Scoring Models
 
 - **Efficacy (0-100%)**: MIC predictions, CMC, membrane disruption
-- **Safety (0-100%)**: Oral toxicity, skin/eye irritation, respiratory
+- **Safety (0-100%)**: hERG, AMES, LD50, DILI predictions
 - **Environmental (0-100%)**: Biodegradability, aquatic toxicity, BCF
 - **SA Score (0-100%)**: Synthetic accessibility
 
@@ -73,9 +92,26 @@ POST /api/generator/start
 }
 ```
 
+### Search Molecules
+```
+POST /api/search/substructure
+{
+  "smarts": "[N+]Cc1ccccc1",
+  "max_results": 50
+}
+```
+
+### Benchmark Molecules
+```
+POST /api/benchmark/molecule
+{
+  "smiles": "CCCCCCCCCCCC[N+](C)(C)Cc1ccccc1.[Cl-]"
+}
+```
+
 ### Get Molecules
 ```
-GET /api/molecules?limit=100&pareto_only=true
+GET /api/molecules?limit=100&sort_by=combined_score
 ```
 
 ### Export Results
@@ -85,6 +121,13 @@ POST /api/export/sdf
 POST /api/export/pdf
 ```
 
+## Requirements
+
+- Python 3.10+
+- Node.js 18+
+- 8GB RAM (16GB recommended)
+- GPU optional
+
 ## License
 
-MIT License
+MIT License - See LICENSE file
